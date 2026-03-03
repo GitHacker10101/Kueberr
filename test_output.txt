@@ -1,0 +1,17 @@
+Starting test...
+Testing Portfolio Persistence...
+Initial holdings count: 3
+Added holding: 5440edff-07ff-4f04-a040-52e1d4c9a938
+Holdings count after add: 4
+Deleted holding
+Holdings count after delete: 3
+
+Testing Watchlist Persistence...
+Initial watchlist count: 5
+Added to watchlist: watchlist-2
+Watchlist count after add: 5
+ERROR: Watchlist count did not increase
+Deleted from watchlist
+Watchlist count after delete: 4
+ERROR: Watchlist count not back to initial
+All tests completed.
