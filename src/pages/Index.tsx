@@ -1,18 +1,20 @@
-import Navbar from "@/components/landing/Navbar";
-import HeroSection from "@/components/landing/HeroSection";
-import FeaturesSection from "@/components/landing/FeaturesSection";
 import DashboardPreview from "@/components/landing/DashboardPreview";
-import PricingSection from "@/components/landing/PricingSection";
+import FeaturesSection from "@/components/landing/FeaturesSection";
 import Footer from "@/components/landing/Footer";
+import HeroSection from "@/components/landing/HeroSection";
+import Navbar from "@/components/landing/Navbar";
+import PricingSection from "@/components/landing/PricingSection";
 
 const Index = () => {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="relative min-h-screen overflow-x-hidden bg-transparent">
       <Navbar />
-      <HeroSection />
-      <FeaturesSection />
-      <DashboardPreview />
-      <PricingSection />
+      <main className="relative z-10">
+        <HeroSection />
+        <FeaturesSection />
+        <DashboardPreview />
+        <PricingSection />
+      </main>
       <Footer />
     </div>
   );

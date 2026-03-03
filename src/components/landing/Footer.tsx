@@ -1,81 +1,122 @@
-import { TrendingUp, Twitter, Linkedin, Github, Mail } from "lucide-react";
+import { ArrowUpRight, Github, Linkedin, Mail, TrendingUp, Twitter } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const Footer = () => {
   return (
-    <footer className="border-t border-border/50 bg-card/50">
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid md:grid-cols-4 gap-8 mb-12">
-          {/* Brand */}
-          <div className="md:col-span-1">
-            <div className="flex items-center gap-2 mb-4">
-              <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center">
-                <TrendingUp className="w-5 h-5 text-primary" />
+    <footer id="about" className="border-t border-white/10 bg-card/55 backdrop-blur-xl">
+      <div className="container mx-auto px-4 py-14">
+        <div className="grid gap-10 md:grid-cols-12">
+          <div className="md:col-span-5">
+            <Link to="/" className="inline-flex items-center gap-2.5">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
+                <TrendingUp className="h-5 w-5 text-primary-foreground" />
               </div>
-              <span className="text-xl font-bold gradient-text">Kueberr</span>
-            </div>
-            <p className="text-sm text-muted-foreground mb-4">
-              AI-powered stock predictions for smarter trading decisions.
+              <div>
+                <p className="text-lg font-semibold gradient-text">Kueberr</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">AI Trading Workspace</p>
+              </div>
+            </Link>
+            <p className="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground">
+              We build execution-grade tooling for traders who want structure, speed, and explainable AI guidance.
             </p>
-            <div className="flex gap-4">
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Twitter className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Linkedin className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Github className="w-5 h-5" />
-              </a>
-              <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                <Mail className="w-5 h-5" />
-              </a>
+            <div className="mt-5 flex items-center gap-2">
+              {[Twitter, Linkedin, Github, Mail].map((Icon, index) => (
+                <a
+                  key={index}
+                  href="#"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-background/50 text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Icon className="h-4 w-4" />
+                </a>
+              ))}
             </div>
           </div>
 
-          {/* Product */}
-          <div>
-            <h4 className="font-semibold text-foreground mb-4">Product</h4>
-            <ul className="space-y-2">
-              <li><a href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Features</a></li>
-              <li><a href="#pricing" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Pricing</a></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">API</a></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Integrations</a></li>
-            </ul>
-          </div>
+          <div className="grid gap-8 sm:grid-cols-3 md:col-span-7">
+            <div>
+              <h4 className="text-sm font-semibold uppercase tracking-[0.15em] text-foreground">Platform</h4>
+              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li>
+                  <a href="#features" className="hover:text-foreground">
+                    Features
+                  </a>
+                </li>
+                <li>
+                  <a href="#preview" className="hover:text-foreground">
+                    Product Preview
+                  </a>
+                </li>
+                <li>
+                  <a href="#pricing" className="hover:text-foreground">
+                    Pricing
+                  </a>
+                </li>
+                <li>
+                  <Link to="/dashboard" className="hover:text-foreground">
+                    Launch App
+                  </Link>
+                </li>
+              </ul>
+            </div>
 
-          {/* Company */}
-          <div>
-            <h4 className="font-semibold text-foreground mb-4">Company</h4>
-            <ul className="space-y-2">
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">About Us</a></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Blog</a></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Careers</a></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Contact</a></li>
-            </ul>
-          </div>
+            <div>
+              <h4 className="text-sm font-semibold uppercase tracking-[0.15em] text-foreground">Resources</h4>
+              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li>
+                  <Link to="/learning" className="hover:text-foreground">
+                    Learning Hub
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/news" className="hover:text-foreground">
+                    Market News
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/economic-calendar" className="hover:text-foreground">
+                    Economic Calendar
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/predictions" className="hover:text-foreground">
+                    Predictions
+                  </Link>
+                </li>
+              </ul>
+            </div>
 
-          {/* Legal */}
-          <div>
-            <h4 className="font-semibold text-foreground mb-4">Legal</h4>
-            <ul className="space-y-2">
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Privacy Policy</a></li>
-              <li><Link to="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Terms of Service</Link></li>
-              <li><Link to="/terms" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Risk Disclosure</Link></li>
-              <li><a href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Cookie Policy</a></li>
-            </ul>
+            <div>
+              <h4 className="text-sm font-semibold uppercase tracking-[0.15em] text-foreground">Legal</h4>
+              <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li>
+                  <Link to="/terms" className="hover:text-foreground">
+                    Terms of Service
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/terms" className="hover:text-foreground">
+                    Risk Disclosure
+                  </Link>
+                </li>
+                <li>
+                  <a href="#" className="hover:text-foreground">
+                    Privacy Policy
+                  </a>
+                </li>
+                <li>
+                  <a href="#" className="inline-flex items-center gap-1 hover:text-foreground">
+                    Contact Team
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </a>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
 
-        <div className="border-t border-border/50 pt-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              © 2026 Kueberr. All rights reserved.
-            </p>
-            <p className="text-xs text-muted-foreground max-w-lg text-center md:text-right">
-              Disclaimer: Trading stocks involves risk. Past performance and predictions are not indicative of future results.
-            </p>
-          </div>
+        <div className="mt-12 flex flex-col gap-3 border-t border-white/10 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <p>Copyright {new Date().getFullYear()} Kueberr. All rights reserved.</p>
+          <p>Disclaimer: Market analysis is for educational purposes only and not investment advice.</p>
         </div>
       </div>
     </footer>

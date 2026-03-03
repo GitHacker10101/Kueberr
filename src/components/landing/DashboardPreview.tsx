@@ -1,142 +1,124 @@
-import { TrendingUp, ArrowUpRight } from "lucide-react";
-import { useScrollAnimation } from "@/hooks/useScrollAnimation";
-import { useState } from "react";
+import { ArrowUpRight, BarChart3, Gauge, Newspaper, Shield, Target } from "lucide-react";
+import { Link } from "react-router-dom";
 
-const mockAssets = [
-  { name: "Reliance Industries", symbol: "RELIANCE", price: "₹2,847.50", change: "+2.34%", isUp: true, prediction: "Strong Buy" },
-  { name: "Tata Consultancy", symbol: "TCS", price: "₹3,521.25", change: "+1.12%", isUp: true, prediction: "Buy" },
-  { name: "Infosys Ltd", symbol: "INFY", price: "₹1,456.80", change: "-0.87%", isUp: false, prediction: "Hold" },
-  { name: "HDFC Bank", symbol: "HDFCBANK", price: "₹1,672.30", change: "+1.21%", isUp: true, prediction: "Strong Buy" },
+const watchlistRows = [
+  { symbol: "RELIANCE", price: "2,847.50", move: "+2.34%", up: true },
+  { symbol: "TCS", price: "3,521.25", move: "+1.12%", up: true },
+  { symbol: "INFY", price: "1,456.80", move: "-0.87%", up: false },
+  { symbol: "HDFCBANK", price: "1,678.35", move: "+0.45%", up: true },
 ];
 
 const DashboardPreview = () => {
-  const { ref: revealRef, isVisible } = useScrollAnimation({ threshold: 0.2 });
-  const [rotation, setRotation] = useState({ x: 0, y: 0 });
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const card = e.currentTarget;
-    const box = card.getBoundingClientRect();
-    const x = e.clientX - box.left;
-    const y = e.clientY - box.top;
-    const centerX = box.width / 2;
-    const centerY = box.height / 2;
-    const rotateX = (y - centerY) / 20;
-    const rotateY = (centerX - x) / 20;
-
-    setRotation({ x: rotateX, y: rotateY });
-  };
-
-  const handleMouseLeave = () => {
-    setRotation({ x: 0, y: 0 });
-  };
-
   return (
-    <section id="preview" className="py-24 relative overflow-hidden bg-background">
-      <div className="container mx-auto px-4 perspective-1000">
-        {/* Header */}
-        <div className={`text-center max-w-3xl mx-auto mb-16 transition-all duration-700 delay-100 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`} ref={revealRef}>
-          <h2 className="text-3xl md:text-5xl font-bold mb-6 tracking-tight">
-            Your Personal
-            <br />
-            <span className="gradient-text">Trading Command Center</span>
+    <section id="preview" className="relative py-24 sm:py-28">
+      <div className="container mx-auto px-4">
+        <div className="mx-auto mb-10 max-w-3xl text-center">
+          <h2 className="text-balance text-3xl font-semibold text-foreground sm:text-4xl md:text-5xl">
+            One workspace for <span className="gradient-text">analysis and execution.</span>
           </h2>
-          <p className="text-lg text-muted-foreground leading-relaxed">
-            Get a glimpse of the powerful dashboard that puts AI predictions
-            and real-time data at your fingertips.
+          <p className="mt-4 text-balance text-base text-muted-foreground sm:text-lg">
+            Track market regime, watchlist conviction, and portfolio exposure without switching tools.
           </p>
         </div>
 
-        {/* Dashboard Preview */}
-        <div className="max-w-6xl mx-auto transform-style-3d transition-transform duration-200 ease-out"
-          style={{
-            transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
-          }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-        >
-          <div className="glass-panel rounded-2xl p-2 border border-white/10 shadow-2xl relative overflow-hidden group">
-            {/* Shimmer Overlay */}
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full animate-shimmer pointer-events-none z-20" />
+        <div className="glass-panel relative overflow-hidden rounded-3xl p-3 sm:p-5">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/8 via-transparent to-accent/8" />
 
-            <div className="bg-background/80 rounded-xl p-6 md:p-8 backdrop-blur-sm border border-white/5">
-              {/* Dashboard Header */}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-foreground">Good Morning, Trader! 👋</h3>
-                  <p className="text-muted-foreground">Here's your market overview for today</p>
+          <div className="relative grid gap-4 lg:grid-cols-12">
+            <aside className="glass-card rounded-2xl p-4 lg:col-span-3">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Risk Monitor</p>
+                <Shield className="h-4 w-4 text-primary" />
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-xl border border-white/10 bg-background/45 p-3">
+                  <p className="text-xs text-muted-foreground">Portfolio Beta</p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">1.08</p>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="px-4 py-2 rounded-lg bg-success/10 border border-success/20 animate-pulse">
-                    <span className="text-sm text-success font-medium">Market Open</span>
+                <div className="rounded-xl border border-white/10 bg-background/45 p-3">
+                  <p className="text-xs text-muted-foreground">Drawdown Guard</p>
+                  <p className="mt-1 text-lg font-semibold text-success">Active</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-background/45 p-3">
+                  <p className="text-xs text-muted-foreground">Max Exposure</p>
+                  <p className="mt-1 text-lg font-semibold text-foreground">62%</p>
+                </div>
+              </div>
+            </aside>
+
+            <div className="glass-card rounded-2xl p-4 lg:col-span-6">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">AI Conviction Board</p>
+                <span className="rounded-full border border-primary/35 bg-primary/10 px-3 py-1 text-xs text-primary">Realtime</span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-white/10 bg-background/45 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Accuracy</p>
+                    <Target className="h-4 w-4 text-primary" />
                   </div>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">91.2%</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Rolling 14-day benchmark</p>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-background/45 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Win/Loss</p>
+                    <Gauge className="h-4 w-4 text-accent" />
+                  </div>
+                  <p className="mt-2 text-2xl font-semibold text-foreground">2.4 : 1</p>
+                  <p className="mt-1 text-xs text-muted-foreground">With current risk filter</p>
                 </div>
               </div>
 
-              {/* Portfolio Summary */}
-              <div className="grid md:grid-cols-3 gap-4 mb-8">
-                <div className="bg-card/50 rounded-xl p-4 border border-white/5 hover:border-primary/20 transition-colors">
-                  <p className="text-sm text-muted-foreground mb-1">Portfolio Value</p>
-                  <p className="text-2xl font-bold text-foreground">₹12,45,680</p>
-                  <div className="flex items-center gap-1 text-success text-sm">
-                    <TrendingUp className="w-4 h-4" />
-                    <span>+₹24,560 (2.01%) today</span>
-                  </div>
+              <div className="mt-3 rounded-xl border border-white/10 bg-background/45 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-medium text-foreground">Watchlist Focus</p>
+                  <Link to="/dashboard" className="text-xs text-primary hover:text-primary/80">
+                    Open workspace
+                  </Link>
                 </div>
-                <div className="bg-card/50 rounded-xl p-4 border border-white/5 hover:border-primary/20 transition-colors">
-                  <p className="text-sm text-muted-foreground mb-1">AI Accuracy (7d)</p>
-                  <p className="text-2xl font-bold gradient-text">91.2%</p>
-                  <p className="text-sm text-muted-foreground">Based on 156 predictions</p>
-                </div>
-                <div className="bg-card/50 rounded-xl p-4 border border-white/5 hover:border-primary/20 transition-colors">
-                  <p className="text-sm text-muted-foreground mb-1">Active Alerts</p>
-                  <p className="text-2xl font-bold text-foreground">8</p>
-                  <p className="text-sm text-muted-foreground">3 triggered today</p>
-                </div>
-              </div>
-
-              {/* Watchlist Preview */}
-              <div className="bg-card/30 rounded-xl overflow-hidden border border-white/5">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
-                  <h4 className="font-semibold text-foreground">Your Watchlist</h4>
-                  <button className="text-sm text-primary hover:text-primary/80 flex items-center gap-1">
-                    View All <ArrowUpRight className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="divide-y divide-border/50">
-                  {mockAssets.map((asset, index) => (
-                    <div key={index} className="flex items-center justify-between px-4 py-4 hover:bg-white/5 transition-colors cursor-pointer group/item">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center group-hover/item:scale-110 transition-transform">
-                          <span className="font-mono text-xs font-bold text-primary">
-                            {asset.symbol.slice(0, 2)}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="font-medium text-foreground group-hover/item:text-primary transition-colors">{asset.name}</p>
-                          <p className="text-sm text-muted-foreground">{asset.symbol}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-mono font-medium text-foreground">{asset.price}</p>
-                        <p className={`text-sm font-medium ${asset.isUp ? 'text-success' : 'text-destructive'}`}>
-                          {asset.change}
-                        </p>
-                      </div>
-                      <div className="hidden md:block">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${asset.prediction === 'Strong Buy'
-                            ? 'bg-success/20 text-success border border-success/20'
-                            : asset.prediction === 'Buy'
-                              ? 'bg-primary/20 text-primary border border-primary/20'
-                              : 'bg-warning/20 text-warning border border-warning/20'
-                          }`}>
-                          {asset.prediction}
-                        </span>
-                      </div>
+                <div className="space-y-2">
+                  {watchlistRows.map((row) => (
+                    <div key={row.symbol} className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2">
+                      <p className="font-mono text-xs text-foreground">{row.symbol}</p>
+                      <p className="font-mono text-xs text-muted-foreground">INR {row.price}</p>
+                      <p className={`text-xs font-semibold ${row.up ? "text-success" : "text-destructive"}`}>{row.move}</p>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
+
+            <aside className="glass-card rounded-2xl p-4 lg:col-span-3">
+              <div className="mb-4 flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Market Pulse</p>
+                <BarChart3 className="h-4 w-4 text-primary" />
+              </div>
+              <div className="space-y-2.5">
+                <div className="rounded-lg border border-white/10 bg-background/45 p-3">
+                  <p className="text-xs text-muted-foreground">Nifty Breadth</p>
+                  <p className="mt-1 text-base font-semibold text-success">68% advancing</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-background/45 p-3">
+                  <p className="text-xs text-muted-foreground">Volatility Trend</p>
+                  <p className="mt-1 text-base font-semibold text-foreground">Cooling</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-background/45 p-3">
+                  <div className="mb-1 flex items-center gap-2 text-muted-foreground">
+                    <Newspaper className="h-4 w-4" />
+                    <p className="text-xs">News signal</p>
+                  </div>
+                  <p className="text-sm text-foreground">Financials outperforming after policy commentary.</p>
+                </div>
+              </div>
+              <Link
+                to="/dashboard"
+                className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary transition-colors hover:text-primary/80"
+              >
+                Explore full dashboard
+                <ArrowUpRight className="h-4 w-4" />
+              </Link>
+            </aside>
           </div>
         </div>
       </div>

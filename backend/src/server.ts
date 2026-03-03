@@ -26,9 +26,22 @@ app.use((req, _res, next) => {
   next();
 });
 app.use(express.json({ limit: '1mb' }));
+const allowedDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 app.use(
   cors({
-    origin: [/^http:\/\/localhost:\d+$/],
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedDevOrigin.test(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, false);
+    },
     credentials: true,
   })
 );

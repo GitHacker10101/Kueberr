@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import type { PluginAPI } from "tailwindcss/types/config";
 import tailwindcssAnimate from "tailwindcss-animate";
 
 export default {
@@ -15,8 +16,9 @@ export default {
     },
     extend: {
       fontFamily: {
-        sans: ['Inter', 'SF Pro Display', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ["Manrope", "Segoe UI", "system-ui", "sans-serif"],
+        mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
+        display: ["Sora", "Manrope", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -134,15 +136,15 @@ export default {
   plugins: [
     tailwindcssAnimate,
     // Plugin to add animation delays
-    function ({ matchUtilities, theme }: any) {
+    function ({ matchUtilities, theme }: PluginAPI) {
       matchUtilities(
         {
-          'delay': (value: any) => ({
+          "delay": (value: string) => ({
             'animation-delay': value,
           }),
         },
-        { values: theme('transitionDelay') }
-      )
+        { values: theme("transitionDelay") as Record<string, string> }
+      );
     },
   ],
 } satisfies Config;

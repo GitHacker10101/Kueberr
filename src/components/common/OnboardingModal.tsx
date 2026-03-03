@@ -1,18 +1,26 @@
 
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { useLocation } from "react-router-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 export const OnboardingModal = () => {
     const [open, setOpen] = useState(false);
+    const location = useLocation();
 
     useEffect(() => {
+        const hiddenOnRoutes = new Set(["/", "/auth", "/login", "/terms"]);
+        if (hiddenOnRoutes.has(location.pathname)) {
+            setOpen(false);
+            return;
+        }
+
         const hasOnboarded = localStorage.getItem('kueberr_onboarded');
         if (!hasOnboarded) {
             setOpen(true);
         }
-    }, []);
+    }, [location.pathname]);
 
     const handleAccept = () => {
         localStorage.setItem('kueberr_onboarded', 'true');

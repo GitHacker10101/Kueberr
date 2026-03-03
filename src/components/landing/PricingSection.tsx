@@ -1,148 +1,121 @@
 import { Button } from "@/components/ui/button";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Crown, ShieldCheck, Zap } from "lucide-react";
 
 const plans = [
   {
-    name: "Coming Soon",
-    price: "",
-    period: "",
-    description: "Perfect for beginners exploring market predictions",
-    features: [
-      "5 stocks in watchlist",
-      "Basic AI predictions",
-      "Daily market summary",
-      "Email notifications",
-      "7-day prediction history",
-      "Community access",
-    ],
-    cta: "Start Basic",
-    popular: false,
+    name: "Starter",
+    price: "INR 0",
+    period: "/month",
+    description: "For new traders validating ideas with AI context.",
+    cta: "Start Free",
+    featured: false,
+    features: ["20 tracked symbols", "Core prediction feed", "Daily recap", "Basic alerts"],
   },
   {
-    name: "Coming Soon",
-    price: "",
-    period: "",
-    description: "For serious traders who want an edge",
+    name: "Pro",
+    price: "INR 1,499",
+    period: "/month",
+    description: "For active traders who need full workflow coverage.",
+    cta: "Upgrade to Pro",
+    featured: true,
     features: [
-      "25 stocks in watchlist",
-      "Advanced AI predictions",
-      "Real-time alerts",
-      "Portfolio tracking",
-      "30-day prediction history",
+      "Unlimited watchlists",
+      "Advanced confidence filters",
+      "Realtime execution alerts",
+      "Portfolio risk monitor",
+      "Strategy journaling",
+    ],
+  },
+  {
+    name: "Desk",
+    price: "INR 4,999",
+    period: "/month",
+    description: "For teams running discretionary or semi-systematic books.",
+    cta: "Contact Sales",
+    featured: false,
+    features: [
+      "Multi-user workspace",
+      "Desk-level risk controls",
+      "API and webhook access",
+      "Dedicated onboarding",
       "Priority support",
-      "Custom alerts",
     ],
-    cta: "Start Pro",
-    popular: true,
-  },
-  {
-    name: "Coming Soon",
-    price: "",
-    period: "",
-    description: "Maximum power for professional traders",
-    features: [
-      "Unlimited watchlist",
-      "Premium AI predictions",
-      "SMS + Push notifications",
-      "Advanced portfolio analytics",
-      "Unlimited history",
-      "Dedicated support",
-      "API access",
-      "Early feature access",
-      "Trading signals",
-      "Risk analysis",
-    ],
-    cta: "Start Pro+",
-    popular: false,
   },
 ];
 
 const PricingSection = () => {
   return (
-    <section id="pricing" className="py-24 relative overflow-hidden">
-      {/* Background */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/5 rounded-full blur-3xl" />
-      
-      <div className="container mx-auto px-4 relative z-10">
-        {/* Header */}
-        <div className="text-center max-w-3xl mx-auto mb-16">
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-6">
-            <Sparkles className="w-4 h-4 text-primary" />
-            <span className="text-sm text-muted-foreground">Simple Pricing</span>
+    <section id="pricing" className="relative py-24 sm:py-28">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-1/2 top-10 h-72 w-[70%] -translate-x-1/2 rounded-full bg-primary/12 blur-[120px]" />
+      </div>
+
+      <div className="container relative z-10 mx-auto px-4">
+        <div className="mx-auto max-w-3xl text-center">
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm text-muted-foreground">
+            <Crown className="h-4 w-4 text-accent" />
+            Clear pricing, no hidden fees
           </div>
-          <h2 className="text-3xl md:text-5xl font-bold mb-6">
-            Choose Your
-            <br />
-            <span className="gradient-text">Trading Power</span>
+          <h2 className="mt-5 text-balance text-3xl font-semibold text-foreground sm:text-4xl md:text-5xl">
+            Pick the plan that matches your <span className="gradient-text">trading intensity.</span>
           </h2>
-          <p className="text-lg text-muted-foreground">
-            Start free and upgrade as you grow. All plans include a 7-day money-back guarantee.
+          <p className="mt-4 text-balance text-base text-muted-foreground sm:text-lg">
+            Start free, upgrade when your workflow needs more velocity and control.
           </p>
         </div>
 
-        {/* Pricing Cards */}
-        <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-          {plans.map((plan, index) => (
-            <div
-              key={index}
-              className={`relative rounded-2xl p-6 ${
-                plan.popular 
-                  ? 'price-card-popular scale-105 z-10' 
-                  : 'glass-card'
-              }`}
+        <div className="mt-12 grid gap-4 lg:grid-cols-3">
+          {plans.map((plan) => (
+            <article
+              key={plan.name}
+              className={`relative rounded-2xl p-6 ${plan.featured ? "price-card-popular scale-[1.01]" : "glass-card"}`}
             >
-              {plan.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <div className="px-4 py-1 rounded-full bg-primary text-primary-foreground text-sm font-medium">
-                    Most Popular
-                  </div>
+              {plan.featured && (
+                <div className="absolute -top-3 left-6 inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground">
+                  <Zap className="h-3.5 w-3.5" />
+                  Most popular
                 </div>
               )}
 
-              <div className="mb-6">
-                <h3 className="text-xl font-bold text-foreground mb-2">{plan.name}</h3>
-                <p className="text-sm text-muted-foreground">{plan.description}</p>
+              <div>
+                <h3 className="text-xl font-semibold text-foreground">{plan.name}</h3>
+                <p className="mt-2 text-sm text-muted-foreground">{plan.description}</p>
               </div>
 
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-foreground">{plan.price}</span>
-                <span className="text-muted-foreground">{plan.period}</span>
+              <div className="mt-6 flex items-end gap-1">
+                <span className="text-4xl font-semibold text-foreground">{plan.price}</span>
+                <span className="pb-1 text-sm text-muted-foreground">{plan.period}</span>
               </div>
 
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((feature, featureIndex) => (
-                  <li key={featureIndex} className="flex items-start gap-3">
-                    <Check className="w-5 h-5 text-success mt-0.5 shrink-0" />
-                    <span className="text-sm text-muted-foreground">{feature}</span>
+              <ul className="mt-6 space-y-2.5">
+                {plan.features.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2.5 text-sm text-muted-foreground">
+                    <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                    {feature}
                   </li>
                 ))}
               </ul>
 
-              <Button 
-                variant={plan.popular ? "hero" : "outline"} 
-                className="w-full"
-                size="lg"
-              >
+              <Button variant={plan.featured ? "default" : "outline"} className="mt-7 w-full" size="lg">
                 {plan.cta}
               </Button>
-            </div>
+            </article>
           ))}
         </div>
 
-        {/* Trust badges */}
-        <div className="flex flex-wrap items-center justify-center gap-8 mt-16 text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Check className="w-5 h-5 text-success" />
-            <span className="text-sm">7-day money back</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Check className="w-5 h-5 text-success" />
-            <span className="text-sm">Cancel anytime</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Check className="w-5 h-5 text-success" />
-            <span className="text-sm">Secure payment</span>
-          </div>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-6 text-xs text-muted-foreground sm:text-sm">
+          <p className="inline-flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            7-day money-back policy
+          </p>
+          <p className="inline-flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            Cancel any time
+          </p>
+          <p className="inline-flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-success" />
+            Secure payment rails
+          </p>
         </div>
       </div>
     </section>

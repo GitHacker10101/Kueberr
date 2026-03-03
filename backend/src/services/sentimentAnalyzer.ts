@@ -1,108 +1,196 @@
-
 export interface SentimentResult {
-    score: number; // -1 (Negative) to 1 (Positive)
-    magnitude: number; // 0 to 1 (Intensity)
-    sources: number; // Number of sources analyzed
-    topKeywords: string[];
-    sentiment: 'Bullish' | 'Bearish' | 'Neutral';
+  score: number; // -1 (Negative) to 1 (Positive)
+  magnitude: number; // 0 to 1 (Intensity)
+  sources: number; // Number of sources analyzed
+  topKeywords: string[];
+  sentiment: 'Bullish' | 'Bearish' | 'Neutral';
 }
 
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
 export class SentimentAnalyzer {
-    // Dictionary of financial sentiment words
-    private static bullWords = new Set([
-        'growth', 'record', 'gain', 'up', 'bull', 'rally', 'surge', 'beat', 'profit',
-        'upgrade', 'buy', 'positive', 'higher', 'strong', 'outperform', 'exceed'
-    ]);
+  // Weighted financial lexicon.
+  private static readonly wordWeights = new Map<string, number>([
+    ['growth', 0.9],
+    ['record', 1],
+    ['gain', 0.7],
+    ['rally', 1],
+    ['surge', 1.1],
+    ['beat', 0.9],
+    ['profit', 0.8],
+    ['upgrade', 0.9],
+    ['buy', 0.7],
+    ['positive', 0.6],
+    ['strong', 0.6],
+    ['outperform', 1.0],
+    ['breakout', 1.0],
+    ['momentum', 0.8],
 
-    private static bearWords = new Set([
-        'loss', 'drop', 'decline', 'down', 'bear', 'crash', 'slump', 'miss', 'warn',
-        'downgrade', 'sell', 'negative', 'lower', 'weak', 'underperform', 'recession'
-    ]);
+    ['loss', -1.0],
+    ['drop', -0.8],
+    ['decline', -0.8],
+    ['bear', -0.7],
+    ['crash', -1.2],
+    ['slump', -1.0],
+    ['miss', -0.8],
+    ['warn', -0.8],
+    ['downgrade', -1.0],
+    ['sell', -0.7],
+    ['negative', -0.6],
+    ['weak', -0.6],
+    ['underperform', -1.0],
+    ['recession', -1.1],
+    ['resistance', -0.6],
+  ]);
 
-    /**
-     * analyzes text or headlines to determine sentiment
-     * @param text The text to analyze
-     */
-    static analyzeText(text: string): SentimentResult {
-        const tokens = text.toLowerCase().split(/\W+/);
-        let score = 0;
-        let matches = 0;
-        const keywords: string[] = [];
+  private static readonly intensifiers = new Set([
+    'very',
+    'extremely',
+    'strongly',
+    'massively',
+    'significantly',
+    'highly',
+  ]);
 
-        tokens.forEach(token => {
-            if (this.bullWords.has(token)) {
-                score += 1;
-                matches++;
-                keywords.push(token);
-            } else if (this.bearWords.has(token)) {
-                score -= 1;
-                matches++;
-                keywords.push(token);
-            }
-        });
+  private static readonly negations = new Set([
+    'not',
+    'no',
+    'never',
+    'hardly',
+    'without',
+  ]);
 
-        // Normalize score
-        const totalTokens = tokens.length;
-        let normalizedScore = totalTokens > 0 && matches > 0 ? (score / matches) : 0;
+  private static toSentimentLabel(score: number): SentimentResult['sentiment'] {
+    if (score > 0.12) return 'Bullish';
+    if (score < -0.12) return 'Bearish';
+    return 'Neutral';
+  }
 
-        // Dampen extreme scores for short texts
-        if (totalTokens < 10) normalizedScore *= 0.8;
+  /**
+   * Analyze text/headlines using weighted lexicon with basic intensity and negation handling.
+   */
+  static analyzeText(text: string): SentimentResult {
+    const tokens = text
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((token) => token.length > 0);
 
-        return {
-            score: normalizedScore,
-            magnitude: Math.min(Math.abs(score) / 5, 1), // Cap magnitude
-            sources: 1,
-            topKeywords: [...new Set(keywords)].slice(0, 5),
-            sentiment: normalizedScore > 0.1 ? 'Bullish' : normalizedScore < -0.1 ? 'Bearish' : 'Neutral'
-        };
+    if (tokens.length === 0) {
+      return { score: 0, magnitude: 0, sources: 1, topKeywords: [], sentiment: 'Neutral' };
     }
 
-    /**
-     * Simulates fetching social sentiment for a stock
-     * In a real app, this would call Twitter/Reddit APIs
-     */
-    static async getStockSentiment(symbol: string): Promise<SentimentResult> {
-        // Simulate API latency
-        await new Promise(resolve => setTimeout(resolve, 50));
+    let weightedScore = 0;
+    let matches = 0;
+    const weightedKeywords = new Map<string, number>();
 
-        // Mock complex sentiment logic based on symbol hash
-        const hash = symbol.split('').reduce((a, b) => a + b.charCodeAt(0), 0);
-        const dayMod = new Date().getDate();
+    tokens.forEach((token, index) => {
+      const baseWeight = this.wordWeights.get(token);
+      if (baseWeight === undefined) return;
 
-        // Deterministic pseudo-randomness for demo consistency
-        const baseScore = Math.sin(hash + dayMod);
-        const randomNoise = (Math.random() - 0.5) * 0.4;
+      let factor = 1;
+      const prev = tokens[index - 1];
+      const prev2 = tokens[index - 2];
 
-        const finalScore = Math.max(-1, Math.min(1, baseScore + randomNoise));
+      if (prev && this.intensifiers.has(prev)) factor *= 1.2;
+      if ((prev && this.negations.has(prev)) || (prev2 && this.negations.has(prev2))) factor *= -1;
 
-        return {
-            score: finalScore,
-            magnitude: 0.4 + Math.random() * 0.6,
-            sources: 100 + Math.floor(Math.random() * 500),
-            topKeywords: finalScore > 0 ? ['growth', 'breakout', 'volume'] : ['resistance', 'drop', 'profit-booking'],
-            sentiment: finalScore > 0.15 ? 'Bullish' : finalScore < -0.15 ? 'Bearish' : 'Neutral'
-        };
+      const finalWeight = baseWeight * factor;
+      weightedScore += finalWeight;
+      matches += 1;
+      weightedKeywords.set(token, (weightedKeywords.get(token) ?? 0) + Math.abs(finalWeight));
+    });
+
+    const normalizedScore = matches > 0 ? clamp(weightedScore / matches, -1, 1) : 0;
+    const coverage = matches / tokens.length;
+    const magnitude = clamp(Math.abs(normalizedScore) * 0.75 + coverage * 0.45, 0, 1);
+
+    const topKeywords = Array.from(weightedKeywords.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([keyword]) => keyword);
+
+    return {
+      score: Number(normalizedScore.toFixed(3)),
+      magnitude: Number(magnitude.toFixed(3)),
+      sources: 1,
+      topKeywords,
+      sentiment: this.toSentimentLabel(normalizedScore),
+    };
+  }
+
+  /**
+   * Deterministic synthetic social sentiment (no per-request randomness).
+   * Stable for the day + symbol so model behavior is reproducible.
+   */
+  static async getStockSentiment(symbol: string): Promise<SentimentResult> {
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    const now = new Date();
+    const yearStart = new Date(now.getFullYear(), 0, 0);
+    const dayOfYear = Math.floor((now.getTime() - yearStart.getTime()) / 86400000);
+    const symbolHash = symbol
+      .toUpperCase()
+      .split('')
+      .reduce((acc, ch) => acc * 31 + ch.charCodeAt(0), 7);
+
+    const raw = Math.sin(symbolHash * 0.017 + dayOfYear * 0.11) + Math.cos(symbolHash * 0.009 + dayOfYear * 0.07);
+    const normalizedScore = clamp(raw / 2.2, -1, 1);
+    const magnitude = clamp(0.42 + Math.abs(normalizedScore) * 0.48, 0, 1);
+    const sources = 120 + Math.abs(symbolHash % 380);
+
+    const bullishKeywords = ['growth', 'momentum', 'breakout', 'upgrade', 'accumulation'];
+    const bearishKeywords = ['resistance', 'downgrade', 'distribution', 'weakness', 'drawdown'];
+    const neutralKeywords = ['consolidation', 'range', 'wait', 'mixed', 'rotation'];
+
+    const topKeywords =
+      normalizedScore > 0.12
+        ? bullishKeywords
+        : normalizedScore < -0.12
+          ? bearishKeywords
+          : neutralKeywords;
+
+    return {
+      score: Number(normalizedScore.toFixed(3)),
+      magnitude: Number(magnitude.toFixed(3)),
+      sources,
+      topKeywords: topKeywords.slice(0, 5),
+      sentiment: this.toSentimentLabel(normalizedScore),
+    };
+  }
+
+  /**
+   * Aggregate multiple sentiment sources by source-count weighted average.
+   */
+  static aggregateSentiment(results: SentimentResult[]): SentimentResult {
+    if (results.length === 0) {
+      return { score: 0, magnitude: 0, sources: 0, topKeywords: [], sentiment: 'Neutral' };
     }
 
-    /**
-     * Aggregates sentiment from multiple sources
-     */
-    static aggregateSentiment(results: SentimentResult[]): SentimentResult {
-        if (results.length === 0) return { score: 0, magnitude: 0, sources: 0, topKeywords: [], sentiment: 'Neutral' };
+    const totalSources = results.reduce((acc, result) => acc + Math.max(1, result.sources), 0);
+    const weightedScore =
+      results.reduce((acc, result) => acc + result.score * Math.max(1, result.sources), 0) /
+      Math.max(1, totalSources);
+    const avgMagnitude = results.reduce((acc, result) => acc + result.magnitude, 0) / results.length;
 
-        const totalWeight = results.reduce((acc, r) => acc + r.sources, 0);
-        const weightedScore = results.reduce((acc, r) => acc + (r.score * r.sources), 0) / totalWeight;
-        const avgMagnitude = results.reduce((acc, r) => acc + r.magnitude, 0) / results.length;
+    const keywordScore = new Map<string, number>();
+    results.forEach((result) => {
+      const sourceWeight = Math.max(1, result.sources);
+      result.topKeywords.forEach((keyword) => {
+        keywordScore.set(keyword, (keywordScore.get(keyword) ?? 0) + sourceWeight);
+      });
+    });
 
-        const allKeywords = results.flatMap(r => r.topKeywords);
-        // basic frequency count for keywords could go here
+    const topKeywords = Array.from(keywordScore.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([keyword]) => keyword);
 
-        return {
-            score: weightedScore,
-            magnitude: avgMagnitude,
-            sources: totalWeight,
-            topKeywords: allKeywords.slice(0, 5), // Just take first 5 for now
-            sentiment: weightedScore > 0.1 ? 'Bullish' : weightedScore < -0.1 ? 'Bearish' : 'Neutral'
-        };
-    }
+    return {
+      score: Number(clamp(weightedScore, -1, 1).toFixed(3)),
+      magnitude: Number(clamp(avgMagnitude, 0, 1).toFixed(3)),
+      sources: totalSources,
+      topKeywords,
+      sentiment: this.toSentimentLabel(weightedScore),
+    };
+  }
 }

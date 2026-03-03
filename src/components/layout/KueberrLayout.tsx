@@ -1,147 +1,261 @@
-
-import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
-    LayoutDashboard,
-    CandlestickChart,
-    Newspaper,
-    Wallet,
-    Settings,
-    Menu,
-    X,
-    Info,
-    ShieldAlert,
-    BarChart3,
-    LineChart
-} from 'lucide-react';
+  Activity,
+  BarChart3,
+  Calendar,
+  ChevronRight,
+  GraduationCap,
+  LayoutDashboard,
+  LineChart,
+  LogOut,
+  Menu,
+  Newspaper,
+  Settings,
+  Sparkles,
+  Star,
+  TrendingUp,
+  Wallet,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 interface LayoutProps {
-    children: React.ReactNode;
+  children: React.ReactNode;
 }
 
-const NavItem = ({ to, icon: Icon, label, active }: { to: string, icon: any, label: string, active: boolean }) => (
+interface NavItem {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const workspaceNavItems: NavItem[] = [
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/markets", label: "Markets", icon: BarChart3 },
+  { to: "/trading", label: "Trading", icon: TrendingUp },
+  { to: "/predictions", label: "Predictions", icon: LineChart },
+  { to: "/portfolio", label: "Portfolio", icon: Wallet },
+  { to: "/watchlist", label: "Watchlist", icon: Star },
+  { to: "/sentiment", label: "Sentiment", icon: Activity },
+  { to: "/news", label: "News", icon: Newspaper },
+  { to: "/learning", label: "Learning", icon: GraduationCap },
+  { to: "/economic-calendar", label: "Calendar", icon: Calendar },
+  { to: "/settings", label: "Settings", icon: Settings },
+];
+
+const workspaceRouteMatchers = [
+  /^\/dashboard$/,
+  /^\/markets$/,
+  /^\/trading$/,
+  /^\/predictions$/,
+  /^\/portfolio$/,
+  /^\/watchlist$/,
+  /^\/sentiment$/,
+  /^\/news$/,
+  /^\/learning$/,
+  /^\/economic-calendar$/,
+  /^\/settings$/,
+  /^\/stock\/.+/,
+];
+
+const pageTitles = new Map<string, string>([
+  ["/dashboard", "Trading Dashboard"],
+  ["/markets", "Market Explorer"],
+  ["/trading", "Trading Center"],
+  ["/predictions", "AI Predictions"],
+  ["/portfolio", "Portfolio"],
+  ["/watchlist", "Watchlist"],
+  ["/sentiment", "Market Sentiment"],
+  ["/news", "Market News"],
+  ["/learning", "Learning Hub"],
+  ["/economic-calendar", "Economic Calendar"],
+  ["/settings", "Settings"],
+]);
+
+const isWorkspaceRoute = (pathname: string): boolean =>
+  workspaceRouteMatchers.some((matcher) => matcher.test(pathname));
+
+const isNavItemActive = (pathname: string, targetPath: string): boolean => {
+  if (targetPath === "/markets" && pathname.startsWith("/stock/")) {
+    return true;
+  }
+
+  return pathname === targetPath || pathname.startsWith(`${targetPath}/`);
+};
+
+const WorkspaceNavLink = ({
+  item,
+  active,
+  onClick,
+}: {
+  item: NavItem;
+  active: boolean;
+  onClick?: () => void;
+}) => {
+  const Icon = item.icon;
+
+  return (
     <Link
-        to={to}
-        className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${active
-            ? 'bg-primary/10 text-primary border-l-2 border-primary'
-            : 'text-muted-foreground hover:text-white hover:bg-white/5'
-            }`}
+      to={item.to}
+      onClick={onClick}
+      className={`group flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-all ${
+        active
+          ? "border border-primary/45 bg-primary/15 text-foreground shadow-[0_0_18px_hsl(var(--primary)/0.22)]"
+          : "border border-transparent text-muted-foreground hover:border-white/10 hover:bg-white/5 hover:text-foreground"
+      }`}
     >
-        <Icon className={`h-5 w-5 ${active ? 'text-primary' : 'text-muted-foreground group-hover:text-white'}`} />
-        <span className="font-medium text-sm">{label}</span>
+      <span className="flex items-center gap-2.5">
+        <Icon className={`h-4 w-4 ${active ? "text-primary" : "text-muted-foreground group-hover:text-primary"}`} />
+        <span className="font-medium">{item.label}</span>
+      </span>
+      <ChevronRight className={`h-4 w-4 transition-transform ${active ? "text-primary" : "text-transparent group-hover:text-muted-foreground"} ${active ? "translate-x-0.5" : ""}`} />
     </Link>
-);
+  );
+};
 
 export const KueberrLayout = ({ children }: LayoutProps) => {
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-    const location = useLocation();
+  const location = useLocation();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
-    const navItems = [
-        { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-        { to: "/markets", icon: BarChart3, label: "Markets" },
-        { to: "/predictions", icon: LineChart, label: "AI Predictions" },
-        { to: "/news", icon: Newspaper, label: "News" },
-        { to: "/portfolio", icon: Wallet, label: "Watchlist" },
-        { to: "/settings", icon: Settings, label: "Settings" },
-    ];
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
 
-    return (
-        <div className="min-h-screen bg-background text-foreground flex overflow-hidden selection:bg-primary/30">
+  const workspaceMode = isWorkspaceRoute(location.pathname);
 
-            {/* Mobile Sidebar Overlay */}
-            {sidebarOpen && (
-                <div
-                    className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40 lg:hidden"
-                    onClick={() => setSidebarOpen(false)}
-                />
-            )}
+  const pageTitle = useMemo(() => {
+    if (location.pathname.startsWith("/stock/")) {
+      return "Asset Details";
+    }
 
-            {/* Sidebar */}
-            <aside
-                className={`fixed lg:static inset-y-0 left-0 z-50 w-64 border-r border-border/40 bg-card/30 backdrop-blur-xl transform transition-transform duration-300 lg:transform-none ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-                    }`}
+    return pageTitles.get(location.pathname) ?? "Workspace";
+  }, [location.pathname]);
+
+  if (!workspaceMode) {
+    return <div className="relative min-h-screen">{children}</div>;
+  }
+
+  return (
+    <div className="relative min-h-screen text-foreground">
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute inset-0 bg-dot-pattern opacity-20" />
+        <div className="absolute -top-28 left-12 h-80 w-80 rounded-full bg-primary/18 blur-[110px]" />
+        <div className="absolute top-1/3 right-[-120px] h-96 w-96 rounded-full bg-accent/12 blur-[130px]" />
+      </div>
+
+      {mobileOpen && (
+        <button
+          aria-label="Close navigation overlay"
+          className="fixed inset-0 z-40 bg-background/70 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          type="button"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-white/10 bg-card/80 backdrop-blur-2xl transition-transform duration-300 lg:translate-x-0 ${
+          mobileOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex h-full flex-col">
+          <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+            <Link to="/" className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent shadow-[0_12px_30px_-16px_hsl(var(--primary)/0.85)]">
+                <TrendingUp className="h-5 w-5 text-primary-foreground" />
+              </div>
+              <div>
+                <p className="text-base font-semibold leading-none gradient-text">Kueberr</p>
+                <p className="mt-1 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Market OS</p>
+              </div>
+            </Link>
+            <button
+              aria-label="Close navigation"
+              className="rounded-md p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground lg:hidden"
+              onClick={() => setMobileOpen(false)}
+              type="button"
             >
-                <div className="h-full flex flex-col">
-                    {/* Logo Area */}
-                    <div className="h-16 flex items-center px-6 border-b border-border/40">
-                        <Link to="/" className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center shadow-glow">
-                                <span className="text-white font-bold text-lg">K</span>
-                            </div>
-                            <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-white/70">
-                                Kueberr
-                            </span>
-                        </Link>
-                    </div>
+              <X className="h-5 w-5" />
+            </button>
+          </div>
 
-                    {/* Navigation */}
-                    <div className="flex-1 py-6 px-3 space-y-1 overflow-y-auto">
-                        <div className="px-3 mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
-                            Platform
-                        </div>
-                        {navItems.map((item) => (
-                            <NavItem
-                                key={item.to}
-                                to={item.to}
-                                icon={item.icon}
-                                label={item.label}
-                                active={location.pathname === item.to}
-                            />
-                        ))}
-                    </div>
+          <div className="flex-1 overflow-y-auto px-4 py-5">
+            <p className="mb-3 px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Workspace
+            </p>
+            <nav className="space-y-1.5">
+              {workspaceNavItems.map((item) => (
+                <WorkspaceNavLink
+                  key={item.to}
+                  item={item}
+                  active={isNavItemActive(location.pathname, item.to)}
+                  onClick={() => setMobileOpen(false)}
+                />
+              ))}
+            </nav>
+          </div>
 
-                    {/* Sidebar Footer */}
-                    <div className="p-4 border-t border-border/40 bg-card/20">
-                        <div className="glass-card p-3 rounded-lg">
-                            <div className="flex items-center gap-2 text-xs text-primary mb-1">
-                                <Info className="h-3 w-3" />
-                                <span className="font-semibold">Market Status</span>
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                                Regime: <span className="text-white font-medium">Volatile</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-
-            {/* Main Content */}
-            <main className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
-                {/* Mobile Header */}
-                <header className="h-16 border-b border-border/40 bg-background/50 backdrop-blur-md flex items-center justify-between px-4 lg:hidden z-30">
-                    <div className="flex items-center gap-2">
-                        <Link to="/" className="flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center">
-                                <span className="text-white font-bold text-lg">K</span>
-                            </div>
-                        </Link>
-                    </div>
-                    <button onClick={() => setSidebarOpen(true)} className="p-2 text-muted-foreground hover:text-white">
-                        <Menu className="h-6 w-6" />
-                    </button>
-                </header>
-
-                {/* Scrollable Content */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 w-full max-w-[1920px] mx-auto pb-20">
-                    {children}
-                </div>
-
-                {/* Persistent Footer Disclaimer */}
-                <footer className="absolute bottom-0 left-0 right-0 bg-card/90 backdrop-blur-md border-t border-border/40 py-2 px-4 z-20">
-                    <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] text-muted-foreground">
-                        <div className="flex items-center gap-2">
-                            <ShieldAlert className="h-3 w-3 text-warning" />
-                            <p>
-                                <strong>DISCLAIMER:</strong> AI-generated market analysis for educational purposes only. Not financial advice.
-                                Trading involves risk.
-                            </p>
-                        </div>
-                        <div>
-                            &copy; {new Date().getFullYear()} Kueberr Inc. All rights reserved.
-                        </div>
-                    </div>
-                </footer>
-            </main>
+          <div className="border-t border-white/10 p-4">
+            <div className="glass-card rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted-foreground">Market regime</span>
+                <span className="badge-success">Live</span>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-foreground">Risk-On Momentum</p>
+              <p className="mt-1 text-xs text-muted-foreground">Volatility easing with broad participation.</p>
+            </div>
+            <Button asChild variant="ghost" className="mt-3 w-full justify-start text-muted-foreground hover:text-foreground">
+              <Link to="/login">
+                <LogOut className="mr-2 h-4 w-4" />
+                Sign Out
+              </Link>
+            </Button>
+          </div>
         </div>
-    );
+      </aside>
+
+      <div className="flex min-h-screen flex-col lg:pl-72">
+        <header className="sticky top-0 z-30 border-b border-white/10 bg-background/70 backdrop-blur-xl">
+          <div className="mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-10">
+            <div className="flex items-center gap-3">
+              <button
+                aria-label="Open navigation"
+                className="rounded-md p-2 text-muted-foreground hover:bg-white/5 hover:text-foreground lg:hidden"
+                onClick={() => setMobileOpen(true)}
+                type="button"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">Workspace</p>
+                <h1 className="text-lg font-semibold text-foreground">{pageTitle}</h1>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button asChild size="sm" variant="ghost" className="hidden sm:inline-flex">
+                <Link to="/">Landing</Link>
+              </Button>
+              <Button asChild size="sm" className="gap-2">
+                <Link to="/trading">
+                  <Sparkles className="h-4 w-4" />
+                  New Trade
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 px-4 pb-20 pt-6 sm:px-6 lg:px-10">{children}</main>
+
+        <footer className="border-t border-white/10 bg-background/60 px-4 py-4 backdrop-blur-xl sm:px-6 lg:px-10">
+          <div className="mx-auto flex flex-col gap-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <p>AI-generated market analysis for educational purposes only and not investment advice.</p>
+            <Link to="/terms" className="text-primary/90 hover:text-primary">
+              Terms and Risk Disclosure
+            </Link>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
 };

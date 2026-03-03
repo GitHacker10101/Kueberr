@@ -59,7 +59,15 @@ describe("Predictions page", () => {
       } as Response)
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ data: [] })
+        json: async () => ({
+          sampleSize: 10,
+          directionalSampleSize: 6,
+          overallAccuracy: 50,
+          directionalAccuracy: 60,
+          maxDrawdown: 4,
+          sharpeProxy: 1.2,
+          caveat: "test"
+        })
       } as Response);
 
     renderWithRouter(<Predictions />);
@@ -73,7 +81,7 @@ describe("Predictions page", () => {
     expect(screen.getByText(/Reliance Industries/i)).toBeInTheDocument();
   });
 
-  it("shows fallback data message when API fails", async () => {
+  it("shows backend error message when API fails", async () => {
     (global.fetch as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error("Network error")
     );
@@ -82,11 +90,10 @@ describe("Predictions page", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Failed to load predictions\. Using fallback data\./i)
+        screen.getByText(/Failed to load live predictions from backend\./i)
       ).toBeInTheDocument();
     });
 
     expect(screen.getByText(/AI Predictions/i)).toBeInTheDocument();
   });
 });
-
