@@ -1,40 +1,41 @@
-import { useParams, useNavigate } from "react-router-dom";
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { motion } from "framer-motion";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  CheckCircle,
+  Loader2,
+  Star,
+  StarOff,
+  Target,
+  Wallet,
+} from "lucide-react";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { motion } from "framer-motion";
-import { getAssetById, getPredictionByAssetId, getTechnicalIndicators } from "@/data/mockDataService";
-import {
-  TrendingUp,
-  TrendingDown,
-  ArrowLeft,
-  Star,
-  StarOff,
-  Plus,
-  Minus,
-  Target,
-  AlertTriangle,
-  Loader2,
-  Wallet,
-  AlertCircle
-} from "lucide-react";
+import { API_BASE } from "@/lib/api";
+
+const USER_ID = "user-1";
 
 interface StockData {
   id: string;
   symbol: string;
   name: string;
-  type: 'stock';
   currentPrice: number;
 }
 
 interface PredictionData {
   id: string;
   assetId: string;
+  symbol: string;
+  name: string;
+  currentPrice: number;
   prediction: string;
-  confidence: string;
+  confidence: number;
   predictedPrice: number;
   timeframe: string;
   trend: string;
@@ -47,51 +48,78 @@ interface PredictionData {
   priceRange?: { low: number; high: number };
   regime?: string;
   sector?: string;
-  marketCap?: number;
-  peRatio?: number;
-  dividendYield?: number;
-  week52High?: number;
-  week52Low?: number;
-  beta?: number;
-  avgVolume?: number;
-  historicalPredictions?: {
-    date: string;
-    prediction: string;
-    actual: string;
-    accuracy: number;
-  }[];
+  marketCapClass?: string;
   supportLevel?: number;
   resistanceLevel?: number;
   volatility?: number;
   analystRating?: string;
   analystCount?: number;
   nextEarningsDate?: string;
+  historicalPredictions?: Array<{
+    date: string;
+    prediction: string;
+    actual: string;
+    accuracy: number;
+  }>;
+  winProbability?: number;
+  riskRewardRatio?: number;
+  modelAgreement?: number;
+  catalysts?: string[];
 }
 
-interface PortfolioItem {
-  assetId: string;
+interface PositionItem {
+  symbol: string;
   quantity: number;
-  avgPrice: number;
+  avg_cost: number;
 }
+
+interface PositionsPayload {
+  positions: PositionItem[];
+  totals: {
+    cash: number;
+  };
+}
+
+interface WatchlistPayload {
+  assets?: Array<{
+    asset_id: string;
+    symbol: string;
+  }>;
+}
+
+const formatMoney = (value: number): string =>
+  `Rs ${value.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 
 const StockDetails = () => {
   const { symbol } = useParams<{ symbol: string }>();
   const navigate = useNavigate();
+
   const [stockData, setStockData] = useState<StockData | null>(null);
   const [prediction, setPrediction] = useState<PredictionData | null>(null);
-  const [portfolioItem, setPortfolioItem] = useState<PortfolioItem | null>(null);
+  const [position, setPosition] = useState<PositionItem | null>(null);
   const [userBalance, setUserBalance] = useState<number>(0);
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tradeQuantity, setTradeQuantity] = useState<string>("1");
   const [tradeLoading, setTradeLoading] = useState(false);
   const [tradeError, setTradeError] = useState<string | null>(null);
   const [tradeSuccess, setTradeSuccess] = useState<string | null>(null);
-  const [isInWatchlist, setIsInWatchlist] = useState(false);
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+
+  const request = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error ?? `Request failed (${response.status})`);
+    }
+    return (await response.json()) as T;
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!symbol) {
-      setError('Stock not found');
+      setError("Stock not found");
       setLoading(false);
       return;
     }
@@ -100,189 +128,136 @@ const StockDetails = () => {
       setLoading(true);
       setError(null);
 
-      // Try API first
-      try {
-        const predRes = await fetch(`http://localhost:3001/api/predictions/${symbol}`);
-        if (!predRes.ok) throw new Error('API failed');
-        const predData = await predRes.json();
-        
-        setPrediction(predData);
-        setStockData({
-          id: predData.assetId,
-          symbol: predData.symbol,
-          name: predData.name,
-          type: predData.type,
-          currentPrice: predData.currentPrice
-        });
+      const symbolUpper = symbol.trim().toUpperCase();
+      const [predictionPayload, positionsPayload, watchlistPayload] = await Promise.all([
+        request<PredictionData>(`${API_BASE}/api/predictions/${symbolUpper}?horizon=monthly&engine=hybrid`),
+        request<PositionsPayload>(`${API_BASE}/api/command/portfolio/positions?user_id=${USER_ID}`).catch(() => ({
+          positions: [],
+          totals: { cash: 0 },
+        })),
+        request<WatchlistPayload>(`${API_BASE}/api/watchlist`).catch(() => ({ assets: [] })),
+      ]);
 
-        const portRes = await fetch('http://localhost:3001/api/portfolio');
-          if (portRes.ok) {
-            const portData = await portRes.json();
-            setUserBalance(portData.portfolio?.cashBalance || 0);
-            
-            const holding = portData.holdings?.find((h: { symbol: string; quantity: number; avgPrice: string }) => h.symbol === predData.symbol);
-            if (holding) {
-              setPortfolioItem({
-                assetId: predData.assetId,
-                quantity: holding.quantity,
-              avgPrice: parseFloat(holding.avgPrice) || 0
-            });
-          }
-        }
-      } catch (apiErr) {
-        console.log('API unavailable, switching to local real-data service');
-        
-        // Fallback to local service
-        const asset = getAssetById(symbol);
-        const pred = getPredictionByAssetId(symbol);
-        
-        if (!asset || !pred) {
-          throw new Error('Stock not found in local database');
-        }
+      setPrediction(predictionPayload);
+      setStockData({
+        id: predictionPayload.assetId,
+        symbol: predictionPayload.symbol,
+        name: predictionPayload.name,
+        currentPrice: predictionPayload.currentPrice,
+      });
 
-        const indicators = getTechnicalIndicators(asset.id);
+      const activePosition =
+        positionsPayload.positions.find(
+          (item) => item.symbol.trim().toUpperCase() === predictionPayload.symbol.trim().toUpperCase()
+        ) ?? null;
+      setPosition(activePosition);
+      setUserBalance(positionsPayload.totals.cash ?? 0);
 
-        setStockData({
-          id: asset.id,
-          symbol: asset.symbol,
-          name: asset.name,
-          type: asset.type as 'stock',
-          currentPrice: asset.current_price
-        });
-
-        setPrediction({
-          id: pred.id,
-          assetId: pred.asset_id,
-          prediction: pred.prediction,
-          confidence: pred.confidence,
-          predictedPrice: pred.predicted_price,
-          timeframe: pred.timeframe,
-          trend: pred.prediction.includes('Buy') ? 'Bullish' : (pred.prediction.includes('Sell') ? 'Bearish' : 'Neutral'),
-          targetPrice: pred.predicted_price,
-          stopLoss: pred.predicted_price * 0.9,
-          riskLevel: pred.risk_level,
-          signals: pred.technical_signals,
-          potentialReturn: ((pred.predicted_price - asset.current_price) / asset.current_price * 100).toFixed(1),
-          lastUpdated: new Date().toISOString(),
-          sector: asset.sector,
-          marketCap: asset.current_price * 1000000,
-          peRatio: 25.5,
-          dividendYield: 1.2,
-          week52High: asset.current_price * 1.15,
-          week52Low: asset.current_price * 0.85,
-          beta: 1.1,
-          avgVolume: 500000,
-          supportLevel: indicators?.support_resistance.support,
-          resistanceLevel: indicators?.support_resistance.resistance,
-          analystRating: pred.prediction,
-          analystCount: 12,
-          nextEarningsDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
-          historicalPredictions: [
-            { date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(), prediction: 'Buy', actual: 'up', accuracy: 85 },
-            { date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), prediction: 'Hold', actual: 'down', accuracy: 92 }
-          ]
-        });
-
-        // Load portfolio from local storage
-        const savedPortfolio = localStorage.getItem('paperPortfolio');
-        if (savedPortfolio) {
-          const portfolio = JSON.parse(savedPortfolio);
-          setUserBalance(portfolio.balance);
-          const holding = portfolio.holdings[asset.symbol];
-          if (holding) {
-            setPortfolioItem({
-              assetId: asset.id,
-              quantity: holding.quantity,
-              avgPrice: holding.avgPrice
-            });
-          } else {
-            setPortfolioItem(null);
-          }
-        } else {
-          setUserBalance(100000);
-          setPortfolioItem(null);
-        }
-      }
-
-      setIsInWatchlist(Math.random() > 0.7);
-
+      const inWatchlist = (watchlistPayload.assets ?? []).some(
+        (item) => item.symbol.trim().toUpperCase() === predictionPayload.symbol.trim().toUpperCase()
+      );
+      setIsInWatchlist(inWatchlist);
     } catch (err) {
-      console.error('Error fetching data:', err);
-      setError('Failed to load stock details. Please try again.');
+      setError(err instanceof Error ? err.message : "Failed to load stock details");
       setStockData(null);
       setPrediction(null);
+      setPosition(null);
+      setUserBalance(0);
+      setIsInWatchlist(false);
     } finally {
       setLoading(false);
     }
-  }, [symbol]);
+  }, [request, symbol]);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
   }, [fetchData]);
 
-  const handleTrade = async (type: 'buy' | 'sell') => {
+  const ensureAssetId = useCallback(async (): Promise<string> => {
+    if (stockData?.id) return stockData.id;
+    if (!stockData?.symbol) throw new Error("Asset symbol unavailable");
+
+    const payload = await request<{ id: string }>(`${API_BASE}/api/market/stocks/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol: stockData.symbol, name: stockData.name }),
+    });
+    return payload.id;
+  }, [request, stockData]);
+
+  const toggleWatchlist = async () => {
     if (!stockData) return;
+    setWatchlistLoading(true);
+    setTradeError(null);
+    setTradeSuccess(null);
 
     try {
-      setTradeLoading(true);
-      setTradeError(null);
-      setTradeSuccess(null);
-
-      const quantity = parseFloat(tradeQuantity);
-      if (isNaN(quantity) || quantity <= 0) {
-        setTradeError('Please enter a valid quantity');
-        return;
+      const assetId = await ensureAssetId();
+      if (isInWatchlist) {
+        await request(`${API_BASE}/api/watchlist/${assetId}`, { method: "DELETE" });
+        setIsInWatchlist(false);
+        setTradeSuccess(`${stockData.symbol} removed from watchlist`);
+      } else {
+        await request(`${API_BASE}/api/watchlist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId }),
+        });
+        setIsInWatchlist(true);
+        setTradeSuccess(`${stockData.symbol} added to watchlist`);
       }
+    } catch (err) {
+      setTradeError(err instanceof Error ? err.message : "Failed to update watchlist");
+    } finally {
+      setWatchlistLoading(false);
+    }
+  };
 
-      const endpoint = type === 'buy' ? 'http://localhost:3001/api/portfolio/buy' : 'http://localhost:3001/api/portfolio/sell';
-      
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+  const handleTrade = async (side: "BUY" | "SELL") => {
+    if (!stockData) return;
+
+    const quantity = Number.parseFloat(tradeQuantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setTradeError("Please enter a valid quantity");
+      return;
+    }
+
+    setTradeLoading(true);
+    setTradeError(null);
+    setTradeSuccess(null);
+
+    try {
+      await request(`${API_BASE}/api/command/portfolio/transactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          assetId: stockData.id,
-          quantity: quantity
-        })
+          user_id: USER_ID,
+          symbol: stockData.symbol.toUpperCase(),
+          side,
+          quantity,
+          price: stockData.currentPrice,
+          fees: 0,
+        }),
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Trade failed');
-      }
-
-      setTradeSuccess(result.message);
+      setTradeSuccess(`${side} transaction recorded for ${quantity} ${stockData.symbol}`);
       setTradeQuantity("1");
-      
-      // Refresh data to update balance and holdings
-      fetchData();
-
-    } catch (err: unknown) {
-      setTradeError(err instanceof Error ? err.message : 'Trade failed');
+      await fetchData();
+    } catch (err) {
+      setTradeError(err instanceof Error ? err.message : "Trade failed");
     } finally {
       setTradeLoading(false);
     }
   };
 
-  const getPredictionColor = (pred: string) => {
-    switch (pred) {
-      case 'Strong Buy': return 'bg-green-500';
-      case 'Buy': return 'bg-green-400';
-      case 'Hold': return 'bg-yellow-500';
-      case 'Sell': return 'bg-red-400';
-      case 'Strong Sell': return 'bg-red-500';
-      default: return 'bg-gray-500';
+  const potentialReturnText = useMemo(() => {
+    if (!prediction) return "0.0";
+    const parsed = Number.parseFloat(prediction.potentialReturn);
+    if (Number.isFinite(parsed)) {
+      return parsed.toFixed(1);
     }
-  };
-
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'Low': return 'text-green-600 bg-green-50';
-      case 'Medium': return 'text-yellow-600 bg-yellow-50';
-      case 'High': return 'text-red-600 bg-red-50';
-      default: return 'text-gray-600 bg-gray-50';
-    }
-  };
+    return prediction.potentialReturn;
+  }, [prediction]);
 
   if (loading) {
     return (
@@ -302,7 +277,7 @@ const StockDetails = () => {
           <AlertTriangle className="w-16 h-16 text-destructive mx-auto mb-4" />
           <h2 className="text-2xl font-bold text-foreground mb-2">Error Loading Stock</h2>
           <p className="text-muted-foreground mb-4">{error || "Stock not found"}</p>
-          <Button onClick={() => navigate('/predictions')}>
+          <Button onClick={() => navigate("/predictions")}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Predictions
           </Button>
@@ -314,390 +289,252 @@ const StockDetails = () => {
   return (
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/predictions')}>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/predictions")}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
             </Button>
             <div>
               <h1 className="text-3xl font-bold text-foreground">{stockData.name}</h1>
-              <p className="text-muted-foreground">{stockData.symbol} • Stock</p>
+              <p className="text-muted-foreground">{stockData.symbol} | Stock</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant={isInWatchlist ? "default" : "outline"}
-              size="sm"
-              onClick={() => setIsInWatchlist(!isInWatchlist)}
-            >
-              {isInWatchlist ? <Star className="w-4 h-4 mr-2" /> : <StarOff className="w-4 h-4 mr-2" />}
-              {isInWatchlist ? 'In Watchlist' : 'Add to Watchlist'}
-            </Button>
-          </div>
+          <Button variant={isInWatchlist ? "default" : "outline"} size="sm" onClick={() => void toggleWatchlist()} disabled={watchlistLoading}>
+            {watchlistLoading ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : isInWatchlist ? (
+              <Star className="w-4 h-4 mr-2" />
+            ) : (
+              <StarOff className="w-4 h-4 mr-2" />
+            )}
+            {isInWatchlist ? "In Watchlist" : "Add to Watchlist"}
+          </Button>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-             {/* Price Card */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
-            >
-            <Card>
-              <CardContent className="p-6">
-                <div className="grid md:grid-cols-2 gap-6">
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+              <Card>
+                <CardContent className="p-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Current Price</p>
+                      <p className="text-3xl font-bold text-foreground">{formatMoney(stockData.currentPrice)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground mb-1">Prediction</p>
+                      <div className="flex items-center gap-2">
+                        <Badge>{prediction.prediction}</Badge>
+                        <Badge variant="outline">{prediction.riskLevel} Risk</Badge>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }}>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="w-5 h-5" />
+                    AI Analysis
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-3 rounded-lg bg-secondary/20">
+                      <p className="text-sm text-muted-foreground">Confidence</p>
+                      <p className="text-xl font-bold text-primary">{prediction.confidence.toFixed(1)}%</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-secondary/20">
+                      <p className="text-sm text-muted-foreground">Potential Return</p>
+                      <p className="text-xl font-bold text-success">+{potentialReturnText}%</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-secondary/20">
+                      <p className="text-sm text-muted-foreground">Win Probability</p>
+                      <p className="text-lg font-semibold">{prediction.winProbability?.toFixed(1) ?? "N/A"}%</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-secondary/20">
+                      <p className="text-sm text-muted-foreground">Risk Reward</p>
+                      <p className="text-lg font-semibold">{prediction.riskRewardRatio?.toFixed(2) ?? "N/A"}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid md:grid-cols-3 gap-4 pt-2">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Target Price</p>
+                      <p className="font-medium">{formatMoney(prediction.targetPrice)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Stop Loss</p>
+                      <p className="font-medium">{formatMoney(prediction.stopLoss)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Timeframe</p>
+                      <p className="font-medium">{prediction.timeframe}</p>
+                    </div>
+                  </div>
+
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Current Price</p>
-                    <p className="text-3xl font-bold text-foreground">
-                      ₹{stockData.currentPrice.toLocaleString('en-IN')}
+                    <h3 className="font-semibold mb-2">Signals</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {(prediction.signals ?? []).map((signal) => (
+                        <span key={signal} className="text-xs rounded-full border border-border/60 px-2 py-1 bg-secondary/20">
+                          {signal}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.1 }}>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Technical Zones and Context</CardTitle>
+                </CardHeader>
+                <CardContent className="grid md:grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Support</p>
+                    <p className="font-medium">{prediction.supportLevel ? formatMoney(prediction.supportLevel) : "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Resistance</p>
+                    <p className="font-medium">
+                      {prediction.resistanceLevel ? formatMoney(prediction.resistanceLevel) : "N/A"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground mb-1">Prediction</p>
-                    <div className="flex items-center gap-2">
-                       <Badge className={`${getPredictionColor(prediction.prediction)} text-white`}>
-                        {prediction.prediction}
-                      </Badge>
-                      <Badge variant="outline" className={getRiskColor(prediction.riskLevel)}>
-                        {prediction.riskLevel} Risk
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-            >
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="w-5 h-5" />
-                  AI Analysis
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-secondary/20 rounded-lg">
-                   <div>
-                      <p className="text-sm text-muted-foreground">Confidence</p>
-                      <p className="text-2xl font-bold text-primary">{prediction.confidence}</p>
-                   </div>
-                   <div>
-                      <p className="text-sm text-muted-foreground text-right">Price Range (5D)</p>
-                      {prediction.priceRange ? (
-                         <p className="text-xl font-bold text-success">
-                            ₹{prediction.priceRange.low.toLocaleString()} - ₹{prediction.priceRange.high.toLocaleString()}
-                         </p>
-                      ) : (
-                         <p className="text-2xl font-bold text-success">₹{prediction.targetPrice.toLocaleString()}</p>
-                      )}
-                   </div>
-                </div>
-
-                <div>
-                   <h3 className="font-semibold mb-2">Analysis</h3>
-                   <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div className="p-2 bg-secondary/30 rounded">
-                        <span className="text-muted-foreground">Trend:</span> {prediction.trend}
-                      </div>
-                      <div className="p-2 bg-secondary/30 rounded">
-                        <span className="text-muted-foreground">Regime:</span> {prediction.regime || 'Unknown'}
-                      </div>
-                   </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Timeframe</p>
-                    <p className="font-medium">{prediction.timeframe}</p>
+                    <p className="text-muted-foreground">Volatility</p>
+                    <p className="font-medium">{prediction.volatility ? prediction.volatility.toFixed(2) : "N/A"}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Potential Return</p>
-                    <p className="font-medium text-success">+{prediction.potentialReturn}%</p>
+                    <p className="text-muted-foreground">Regime</p>
+                    <p className="font-medium">{prediction.regime ?? "N/A"}</p>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                  <div>
+                    <p className="text-muted-foreground">Sector</p>
+                    <p className="font-medium">{prediction.sector ?? "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Model Agreement</p>
+                    <p className="font-medium">{prediction.modelAgreement?.toFixed(1) ?? "N/A"}%</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Analyst Rating</p>
+                    <p className="font-medium">{prediction.analystRating ?? "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Analyst Count</p>
+                    <p className="font-medium">{prediction.analystCount ?? "N/A"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Next Earnings</p>
+                    <p className="font-medium">
+                      {prediction.nextEarningsDate
+                        ? new Date(prediction.nextEarningsDate).toLocaleDateString("en-IN")
+                        : "N/A"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
             </motion.div>
 
-            {typeof prediction.supportLevel === 'number' && typeof prediction.resistanceLevel === 'number' && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.2 }}
-              >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Trading Zones</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Support Level</p>
-                      <p className="font-mono font-medium">
-                        ₹{prediction.supportLevel.toLocaleString('en-IN')}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Resistance Level</p>
-                      <p className="font-mono font-medium">
-                        ₹{prediction.resistanceLevel.toLocaleString('en-IN')}
-                      </p>
-                    </div>
-                    {typeof prediction.volatility === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Estimated Volatility</p>
-                        <p className="font-mono font-medium">
-                          ₹{prediction.volatility.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              </motion.div>
-            )}
-
-            {prediction.analystRating && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.3 }}
-              >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Analyst Insights</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Consensus Rating</p>
-                      <p className="font-medium">{prediction.analystRating}</p>
-                    </div>
-                    {typeof prediction.analystCount === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Analyst Coverage</p>
-                        <p className="font-medium">
-                          {prediction.analystCount} firms
-                        </p>
-                      </div>
-                    )}
-                    {prediction.nextEarningsDate && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Next Earnings</p>
-                        <p className="font-medium">
-                          {new Date(prediction.nextEarningsDate).toLocaleDateString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              </motion.div>
-            )}
-
-            {prediction.sector && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.4 }}
-              >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Fundamentals</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Sector</p>
-                      <p className="font-medium">{prediction.sector}</p>
-                    </div>
-                    {typeof prediction.marketCap === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Market Cap</p>
-                        <p className="font-mono font-medium">
-                          ₹{prediction.marketCap.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                    {typeof prediction.peRatio === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">P/E Ratio</p>
-                        <p className="font-medium">{prediction.peRatio.toFixed(1)}</p>
-                      </div>
-                    )}
-                    {typeof prediction.dividendYield === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Dividend Yield</p>
-                        <p className="font-medium">
-                          {prediction.dividendYield.toFixed(2)}%
-                        </p>
-                      </div>
-                    )}
-                    {typeof prediction.week52High === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">52W High</p>
-                        <p className="font-mono font-medium">
-                          ₹{prediction.week52High.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                    {typeof prediction.week52Low === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">52W Low</p>
-                        <p className="font-mono font-medium">
-                          ₹{prediction.week52Low.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                    {typeof prediction.beta === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Beta</p>
-                        <p className="font-medium">{prediction.beta.toFixed(2)}</p>
-                      </div>
-                    )}
-                    {typeof prediction.avgVolume === 'number' && (
-                      <div>
-                        <p className="text-sm text-muted-foreground">Avg Volume</p>
-                        <p className="font-mono font-medium">
-                          {prediction.avgVolume.toLocaleString('en-IN')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              </motion.div>
-            )}
-
-            {prediction.historicalPredictions && prediction.historicalPredictions.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.5 }}
-              >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Prediction History</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border/50">
-                          <th className="text-left py-2 pr-4 text-muted-foreground">Date</th>
-                          <th className="text-left py-2 pr-4 text-muted-foreground">Prediction</th>
-                          <th className="text-left py-2 pr-4 text-muted-foreground">Actual</th>
-                          <th className="text-right py-2 text-muted-foreground">Accuracy</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {prediction.historicalPredictions.map((item, index) => (
-                          <tr key={index} className="border-b border-border/30 last:border-0">
-                            <td className="py-2 pr-4">
-                              {new Date(item.date).toLocaleDateString('en-IN')}
-                            </td>
-                            <td className="py-2 pr-4">{item.prediction}</td>
-                            <td className="py-2 pr-4">
-                              {item.actual === 'up' ? 'Price Up' : 'Price Down'}
-                            </td>
-                            <td className="py-2 text-right">
-                              {item.accuracy}%
-                            </td>
+            {Array.isArray(prediction.historicalPredictions) && prediction.historicalPredictions.length > 0 && (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.15 }}>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Prediction History</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border/50">
+                            <th className="text-left py-2 pr-4 text-muted-foreground">Date</th>
+                            <th className="text-left py-2 pr-4 text-muted-foreground">Prediction</th>
+                            <th className="text-left py-2 pr-4 text-muted-foreground">Actual</th>
+                            <th className="text-right py-2 text-muted-foreground">Accuracy</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardContent>
-              </Card>
+                        </thead>
+                        <tbody>
+                          {prediction.historicalPredictions.map((item, index) => (
+                            <tr key={`${item.date}-${index}`} className="border-b border-border/30 last:border-0">
+                              <td className="py-2 pr-4">{new Date(item.date).toLocaleDateString("en-IN")}</td>
+                              <td className="py-2 pr-4">{item.prediction}</td>
+                              <td className="py-2 pr-4">{item.actual === "up" ? "Price Up" : "Price Down"}</td>
+                              <td className="py-2 text-right">{item.accuracy}%</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </CardContent>
+                </Card>
               </motion.div>
             )}
           </div>
 
-          {/* Sidebar - Trading */}
           <div className="space-y-6">
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-            >
-            <Card className="border-primary/20 shadow-lg">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wallet className="w-5 h-5 text-primary" />
-                  Paper Trading
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="p-3 bg-secondary/50 rounded-lg space-y-2">
-                   <div className="flex justify-between text-sm">
-                     <span className="text-muted-foreground">Available Balance</span>
-                     <span className="font-medium">₹{userBalance.toLocaleString('en-IN')}</span>
-                   </div>
-                   {portfolioItem && (
-                     <div className="flex justify-between text-sm">
-                       <span className="text-muted-foreground">Your Holding</span>
-                       <span className="font-medium">{portfolioItem.quantity} units</span>
-                     </div>
-                   )}
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Quantity</label>
-                  <Input 
-                    type="number" 
-                    min="0.01" 
-                    step="0.01"
-                    value={tradeQuantity} 
-                    onChange={(e) => setTradeQuantity(e.target.value)} 
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Total: ₹{((parseFloat(tradeQuantity) || 0) * stockData.currentPrice).toLocaleString('en-IN')}
-                  </p>
-                </div>
-
-                {tradeError && (
-                  <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-lg flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
-                    {tradeError}
+            <motion.div initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.35, delay: 0.1 }}>
+              <Card className="border-primary/20 shadow-lg">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-primary" />
+                    Portfolio Transaction
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="p-3 bg-secondary/50 rounded-lg space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Cash Balance</span>
+                      <span className="font-medium">{formatMoney(userBalance)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Current Holding</span>
+                      <span className="font-medium">{position ? position.quantity.toFixed(2) : "0.00"} units</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Average Cost</span>
+                      <span className="font-medium">{formatMoney(position?.avg_cost ?? 0)}</span>
+                    </div>
                   </div>
-                )}
 
-                {tradeSuccess && (
-                  <div className="p-3 bg-green-500/10 text-green-600 text-sm rounded-lg flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4" />
-                    {tradeSuccess}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Quantity</label>
+                    <Input type="number" min="0.01" step="0.01" value={tradeQuantity} onChange={(event) => setTradeQuantity(event.target.value)} />
+                    <p className="text-xs text-muted-foreground">
+                      Notional: {formatMoney((Number.parseFloat(tradeQuantity) || 0) * stockData.currentPrice)}
+                    </p>
                   </div>
-                )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <Button 
-                    className="w-full bg-green-600 hover:bg-green-700" 
-                    onClick={() => handleTrade('buy')}
-                    disabled={tradeLoading}
-                  >
-                    {tradeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Buy"}
-                  </Button>
-                  <Button 
-                    className="w-full bg-red-600 hover:bg-red-700" 
-                    variant="destructive"
-                    onClick={() => handleTrade('sell')}
-                    disabled={tradeLoading || !portfolioItem}
-                  >
-                     {tradeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sell"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+                  {tradeError && (
+                    <div className="p-3 bg-destructive/10 text-destructive text-sm rounded-lg flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" />
+                      {tradeError}
+                    </div>
+                  )}
+
+                  {tradeSuccess && (
+                    <div className="p-3 bg-green-500/10 text-green-600 text-sm rounded-lg flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" />
+                      {tradeSuccess}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button className="w-full bg-green-600 hover:bg-green-700" onClick={() => void handleTrade("BUY")} disabled={tradeLoading}>
+                      {tradeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Buy"}
+                    </Button>
+                    <Button className="w-full bg-red-600 hover:bg-red-700" variant="destructive" onClick={() => void handleTrade("SELL")} disabled={tradeLoading}>
+                      {tradeLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sell"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </motion.div>
           </div>
         </div>

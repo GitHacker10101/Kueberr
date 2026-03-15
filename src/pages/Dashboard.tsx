@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, ArrowUpRight, Bell, Plus, Loader2, LogOut } f
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_BASE } from "@/lib/api";
 
 interface PortfolioData {
   totalValue: string;
@@ -94,19 +95,28 @@ const Dashboard = () => {
         setLoading(true);
         setError(null);
 
-        // Fetch portfolio data
-        const portfolioResponse = await fetch('http://localhost:3001/api/portfolio');
+        const portfolioResponse = await fetch(`${API_BASE}/api/portfolio`);
         if (!portfolioResponse.ok) throw new Error('Failed to fetch portfolio data');
         const portfolioResult = await portfolioResponse.json();
+        const portfolioPayload = portfolioResult.portfolio ?? {};
+        const holdingsPayload = Array.isArray(portfolioResult.holdings) ? portfolioResult.holdings : [];
 
-        // Fetch alerts data
-        const alertsResponse = await fetch('http://localhost:3001/api/alerts');
+        const alertsResponse = await fetch(`${API_BASE}/api/alerts`);
         if (!alertsResponse.ok) throw new Error('Failed to fetch alerts data');
         const alertsResult = await alertsResponse.json();
+        const alertsPayload = Array.isArray(alertsResult.alerts) ? alertsResult.alerts : [];
 
-        setPortfolioData(portfolioResult.portfolio);
+        setPortfolioData({
+          totalValue: String(portfolioPayload.totalValue ?? "Rs 0"),
+          dayChange: String(portfolioPayload.dayChange ?? "Rs 0"),
+          dayChangePercent: String(portfolioPayload.dayChangePercent ?? "0.00%"),
+          isUp: Boolean(portfolioPayload.isUp),
+          accuracy: String(portfolioPayload.accuracy ?? "N/A"),
+          activeAlerts: Number(portfolioPayload.activeAlerts ?? 0),
+          alertsTriggeredToday: Number(portfolioPayload.alertsTriggeredToday ?? 0),
+        });
 
-        const dashboardAssets: Asset[] = (portfolioResult.holdings as {
+        const dashboardAssets: Asset[] = (holdingsPayload as {
           name: string;
           symbol: string;
           currentPrice: string;
@@ -125,33 +135,20 @@ const Dashboard = () => {
         }));
 
         setAssets(dashboardAssets);
-        setAlerts(alertsResult.alerts);
+        setAlerts(
+          alertsPayload.map((row: { symbol?: string; message?: string; created_at?: string; type?: string }) => ({
+            asset: row.symbol ?? "N/A",
+            message: row.message ?? "Alert event",
+            time: row.created_at ? new Date(row.created_at).toLocaleString() : "N/A",
+            type: row.type ?? "info",
+          }))
+        );
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
-        setError('Failed to load dashboard data. Using fallback data.');
-
-        // Fallback to mock data
-        setPortfolioData({
-          totalValue: "₹12,45,680",
-          dayChange: "+₹24,560",
-          dayChangePercent: "+2.01%",
-          isUp: true,
-          accuracy: "91.2%",
-          activeAlerts: 8,
-          alertsTriggeredToday: 3
-        });
-
-        setAssets([
-          { name: "Reliance Industries", symbol: "RELIANCE", price: "₹2,847.50", change: "+2.34%", isUp: true, prediction: "Strong Buy", holdings: "₹2,84,750" },
-          { name: "Tata Consultancy", symbol: "TCS", price: "₹3,521.25", change: "+1.12%", isUp: true, prediction: "Buy", holdings: "₹1,76,062" },
-          { name: "Infosys Ltd", symbol: "INFY", price: "₹1,456.80", change: "-0.87%", isUp: false, prediction: "Hold", holdings: "₹1,45,680" },
-        ]);
-
-        setAlerts([
-          { asset: "RELIANCE", message: "Price crossed ₹2,800 resistance", time: "2 min ago", type: "success" },
-          { asset: "INFY", message: "AI prediction changed to Hold", time: "15 min ago", type: "warning" },
-          { asset: "TCS", message: "Approaching target price", time: "1 hour ago", type: "info" },
-        ]);
+        setError('Failed to load dashboard data from backend.');
+        setPortfolioData(null);
+        setAssets([]);
+        setAlerts([]);
       } finally {
         setLoading(false);
       }
@@ -180,7 +177,7 @@ const Dashboard = () => {
           <div className="glass-card rounded-xl p-4 border border-destructive/40 bg-destructive/5">
             <p className="text-sm text-destructive font-medium">Error loading live dashboard data</p>
             <p className="text-xs text-muted-foreground mt-1">
-              {error} Some numbers below are based on fallback values.
+              {error}
             </p>
           </div>
         )}
@@ -381,3 +378,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

@@ -2,8 +2,10 @@ import { NormalizedIndicators } from './technicalAnalysis';
 import { MarketRegime } from './regimeDetector';
 import { SentimentResult } from './sentimentAnalyzer';
 import { Pattern } from './patternRecognition';
+import type { AdaptiveCalibrationProfile } from './adaptiveModelTrainer';
 
 type RiskLevel = 'Low' | 'Medium' | 'High';
+export type PredictionHorizon = 'daily' | 'weekly' | 'monthly';
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
@@ -44,7 +46,9 @@ export class EnsembleEngine {
     indicators: NormalizedIndicators,
     regime: MarketRegime,
     sentiment?: SentimentResult,
-    patterns: Pattern[] = []
+    patterns: Pattern[] = [],
+    _horizon: PredictionHorizon = 'daily',
+    calibration?: AdaptiveCalibrationProfile
   ): PredictionResult {
     // Regime-aware weight matrix tuned for stable multi-factor behavior.
     let weights = {
@@ -159,15 +163,41 @@ export class EnsembleEngine {
 
     const regimeBias = regime === 'Bull' ? 0.05 : regime === 'Bear' ? -0.05 : 0;
     adjustedScore = clamp(adjustedScore + regimeBias, -1, 1);
+    if (calibration) {
+      const multiplier = calibration.regimeMultiplier?.[regime] ?? 1;
+      adjustedScore = clamp(adjustedScore * multiplier, -1, 1);
+    }
 
     let direction: PredictionResult['direction'] = 'Neutral';
     const directionalThreshold = isChoppyRegime
       ? clamp(0.56 + indicators.volatility * 0.22 + (1 - signalClarity) * 0.12, 0.56, 0.82)
       : clamp(0.16 + indicators.volatility * 0.08 + (1 - signalClarity) * 0.07 + (1 - indicators.adx) * 0.03, 0.16, 0.36);
-    if (adjustedScore > directionalThreshold) direction = 'Bullish';
-    else if (adjustedScore < -directionalThreshold) direction = 'Bearish';
+    const calibratedDirectionalThreshold = clamp(
+      directionalThreshold * (calibration?.thresholdScale ?? 1),
+      isChoppyRegime ? 0.52 : 0.1,
+      isChoppyRegime ? 0.9 : 0.46
+    );
+    if (adjustedScore > calibratedDirectionalThreshold) direction = 'Bullish';
+    else if (adjustedScore < -calibratedDirectionalThreshold) direction = 'Bearish';
 
-    const absScore = Math.abs(adjustedScore);
+    let absScore = Math.abs(adjustedScore);
+
+    if (_horizon === 'monthly') {
+      const monthlyPrecisionGate =
+        indicators.adx >= 0.55 &&
+        indicators.volatility <= 0.7 &&
+        modelAgreement >= 50 &&
+        absScore >= 0.08;
+
+      if (monthlyPrecisionGate) {
+        direction = adjustedScore >= 0 ? 'Bullish' : 'Bearish';
+      } else {
+        direction = 'Neutral';
+        adjustedScore *= 0.75;
+      }
+
+      absScore = Math.abs(adjustedScore);
+    }
     let confidence: PredictionResult['confidence'] = 'Low';
     if (absScore > 0.62) confidence = 'High';
     else if (absScore > 0.34) confidence = 'Medium';
@@ -183,6 +213,9 @@ export class EnsembleEngine {
     let confidenceScore = Math.round(
       clamp(absScore * 100 * reliabilityMultiplier + directionalBonus + confluenceBonus, 42, 99)
     );
+    if (calibration) {
+      confidenceScore = Math.round(clamp(confidenceScore + calibration.confidenceShift, 35, 99));
+    }
 
     if (direction === 'Neutral' && isChoppyRegime) {
       confidenceScore = Math.min(confidenceScore, 60);
@@ -193,19 +226,27 @@ export class EnsembleEngine {
     let winProbability = Math.round(
       clamp(50 + adjustedScore * 34 + (modelAgreement - 50) * 0.2 + (signalClarity - 0.5) * 18 - indicators.volatility * 11, 30, 96)
     );
+    if (calibration) {
+      winProbability = Math.round(clamp(winProbability + calibration.winRateBias, 30, 97));
+    }
 
     if (direction === 'Neutral') {
       winProbability = Math.round(clamp(50 + (modelAgreement - 50) * 0.08 - indicators.volatility * 4, 45, 65));
     }
 
     // Simulated backtest metric exposed transparently as modeled (not realized) accuracy.
-    const simulatedBacktestAccuracy = Math.round(
+    let simulatedBacktestAccuracy = Math.round(
       clamp(
         82 + modelAgreement * 0.08 + absScore * 10 + (signalClarity - 0.5) * 8 - indicators.volatility * 6,
         72,
         94
       )
     );
+    if (calibration) {
+      simulatedBacktestAccuracy = Math.round(
+        clamp(simulatedBacktestAccuracy + (calibration.directionalHitRate - 50) * 0.12, 70, 96)
+      );
+    }
 
     const riskComposite = indicators.volatility * 0.55 + trendMomentumConflict * 0.25 + (1 - absScore) * 0.2;
     let riskLevel: RiskLevel = 'Medium';

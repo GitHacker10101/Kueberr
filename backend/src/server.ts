@@ -11,6 +11,8 @@ import predictionsRoutes from './routes/predictions';
 import paymentsRoutes from './routes/payments';
 import sentimentRoutes from './routes/sentiment';
 import marketRoutes from './routes/market';
+import commandCenterRoutes from './routes/commandCenter';
+import { responseMetaMiddleware } from './middleware/responseMeta';
 
 dotenv.config();
 
@@ -26,6 +28,7 @@ app.use((req, _res, next) => {
   next();
 });
 app.use(express.json({ limit: '1mb' }));
+app.use(responseMetaMiddleware);
 const allowedDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
 app.use(
   cors({
@@ -58,6 +61,7 @@ app.use('/api/predictions', predictionsRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/sentiment', sentimentRoutes);
 app.use('/api/market', marketRoutes);
+app.use('/api/command', commandCenterRoutes);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled error', err);

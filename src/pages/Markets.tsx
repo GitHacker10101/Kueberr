@@ -1,191 +1,280 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  BarChart3,
+  Filter,
+  Globe,
+  Loader2,
   Search,
-  TrendingUp,
-  TrendingDown,
   Star,
   StarOff,
-  Filter,
-  BarChart3,
-  Loader2,
-  Globe
+  TrendingDown,
+  TrendingUp,
+  TriangleAlert,
 } from "lucide-react";
-import { getAllAssets } from "@/data/mockDataService";
+import { toast } from "sonner";
+import { API_BASE } from "@/lib/api";
 
 interface Asset {
   id: string;
   symbol: string;
   name: string;
-  type: 'stock';
-  current_price: number;
-  change_percent_24h?: number;
-  market_cap?: number;
-  volume_24h?: number;
-  isIndian?: boolean;
+  type: "stock";
+  current_price: number | null;
+  isIndian: boolean;
+  livePrice: number | null;
+  changePercent1d: number | null;
+}
+
+interface WatchlistPayload {
+  assets?: Array<{ symbol: string }>;
+}
+
+interface MarketStocksPayload {
+  items?: Array<{
+    id: string;
+    symbol: string;
+    name: string;
+    type: "stock";
+    current_price?: number | null;
+  }>;
+}
+
+interface QuotePayload {
+  id: string;
+  price: number | null;
+  changePercent1d: number | null;
 }
 
 const INDIAN_SYMBOLS = new Set([
-  'RELIANCE',
-  'TCS',
-  'INFY',
-  'HDFCBANK',
-  'ICICIBANK',
-  'HINDUNILVR',
-  'ITC',
-  'KOTAKBANK',
-  'LT',
-  'AXISBANK',
-  'BAJFINANCE',
-  'MARUTI',
-  'BHARTIARTL',
-  'ADANIPORTS',
-  'POWERGRID',
-  'NTPC',
-  'SUNPHARMA',
-  'DRREDDY',
-  'CIPLA',
-  'DIVISLAB',
-  'ONGC',
-  'COALINDIA',
-  'GAIL',
-  'TATASTEEL',
-  'JSWSTEEL',
-  'ULTRACEMCO',
-  'GRASIM',
-  'AMBUJACEM',
-  'SHREECEM',
-  'ASIANPAINT'
+  "RELIANCE",
+  "TCS",
+  "INFY",
+  "HDFCBANK",
+  "ICICIBANK",
+  "HINDUNILVR",
+  "ITC",
+  "KOTAKBANK",
+  "LT",
+  "AXISBANK",
+  "BAJFINANCE",
+  "MARUTI",
+  "BHARTIARTL",
+  "ADANIPORTS",
+  "POWERGRID",
+  "NTPC",
+  "SUNPHARMA",
+  "DRREDDY",
+  "CIPLA",
+  "DIVISLAB",
+  "ONGC",
+  "COALINDIA",
+  "GAIL",
+  "TATASTEEL",
+  "JSWSTEEL",
+  "ULTRACEMCO",
+  "GRASIM",
+  "AMBUJACEM",
+  "SHREECEM",
+  "ASIANPAINT",
 ]);
+
+const formatPrice = (price: number | null): string => {
+  if (price === null || !Number.isFinite(price)) return "N/A";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(price);
+};
 
 const Markets = () => {
   const navigate = useNavigate();
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [filteredAssets, setFilteredAssets] = useState<Asset[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<'name' | 'price' | 'change'>('name');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
-  const [activeTab, setActiveTab] = useState<'all' | 'stocks'>('all');
+  const [sortBy, setSortBy] = useState<"name" | "price" | "change">("name");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [activeTab, setActiveTab] = useState<"all" | "stocks">("all");
   const [loading, setLoading] = useState(true);
-  const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [watchlistSymbols, setWatchlistSymbols] = useState<Set<string>>(new Set());
+  const [pendingWatchlistSymbol, setPendingWatchlistSymbol] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     const fetchAssets = async () => {
       try {
         setLoading(true);
-        const allAssets = getAllAssets();
+        setError(null);
 
-        // Enhance assets with mock data
-        const enhancedAssets = allAssets.map(asset => ({
-          ...asset,
-          change_percent_24h: (Math.random() - 0.5) * 10,
-          market_cap: Math.random() * 1000000000000,
-          volume_24h: Math.random() * 1000000000,
-          isIndian: INDIAN_SYMBOLS.has(asset.symbol.toUpperCase())
+        const [marketResponse, watchlistResponse] = await Promise.all([
+          fetch(`${API_BASE}/api/market/stocks?limit=700`),
+          fetch(`${API_BASE}/api/watchlist`),
+        ]);
+
+        if (!marketResponse.ok) {
+          const payload = (await marketResponse.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? "Failed to load market universe");
+        }
+
+        const marketPayload = (await marketResponse.json()) as MarketStocksPayload | { items?: Asset[] };
+        const rawItems = Array.isArray((marketPayload as MarketStocksPayload).items)
+          ? (marketPayload as MarketStocksPayload).items!
+          : [];
+
+        const baseAssets: Asset[] = rawItems.map((asset) => ({
+          id: asset.id,
+          symbol: asset.symbol,
+          name: asset.name,
+          type: "stock",
+          current_price: asset.current_price ?? null,
+          isIndian: INDIAN_SYMBOLS.has(asset.symbol.toUpperCase()),
+          livePrice: asset.current_price ?? null,
+          changePercent1d: null,
         }));
 
-        setAssets(enhancedAssets);
-        setFilteredAssets(enhancedAssets);
+        setAssets(baseAssets);
 
-        // Mock watchlist (in real app, this would come from user data)
-        const mockWatchlist = new Set(['RELIANCE', 'TCS']);
-        setWatchlist(mockWatchlist);
-      } catch (error) {
-        console.error('Error fetching assets:', error);
+        if (watchlistResponse.ok) {
+          const watchlistPayload = (await watchlistResponse.json()) as WatchlistPayload;
+          const symbols = new Set(
+            Array.isArray(watchlistPayload.assets) ? watchlistPayload.assets.map((item) => item.symbol.toUpperCase()) : []
+          );
+          setWatchlistSymbols(symbols);
+        }
+      } catch (err) {
+        setAssets([]);
+        setError(err instanceof Error ? err.message : "Failed to load market data");
       } finally {
         setLoading(false);
       }
     };
 
-    fetchAssets();
+    void fetchAssets();
   }, []);
 
   useEffect(() => {
-    let filtered = assets;
+    if (assets.length === 0) return;
+    let cancelled = false;
 
-    // Filter by tab
-    if (activeTab !== 'all') {
-      filtered = filtered.filter(asset => asset.type === activeTab.slice(0, -1)); // Remove 's' from 'stocks'
+    const fetchQuotes = async () => {
+      const sample = assets.slice(0, 60);
+      const results = await Promise.allSettled(
+        sample.map(async (asset) => {
+          const response = await fetch(`${API_BASE}/api/market/quote/${asset.id}`);
+          if (!response.ok) return null;
+          const payload = (await response.json()) as QuotePayload;
+          if (payload.price === null) return null;
+          return {
+            id: asset.id,
+            price: payload.price,
+            changePercent1d: payload.changePercent1d,
+          };
+        })
+      );
+
+      if (cancelled) return;
+      const quoteMap = new Map<string, { price: number; changePercent1d: number | null }>();
+      results.forEach((entry) => {
+        if (entry.status !== "fulfilled" || !entry.value) return;
+        quoteMap.set(entry.value.id, { price: entry.value.price, changePercent1d: entry.value.changePercent1d });
+      });
+
+      setAssets((prev) =>
+        prev.map((asset) => {
+          const quote = quoteMap.get(asset.id);
+          if (!quote) return asset;
+          return {
+            ...asset,
+            livePrice: quote.price,
+            changePercent1d: quote.changePercent1d,
+          };
+        })
+      );
+    };
+
+    void fetchQuotes();
+    return () => {
+      cancelled = true;
+    };
+  }, [assets.length]);
+
+  const filteredAssets = useMemo(() => {
+    let filtered = [...assets];
+
+    if (activeTab !== "all") {
+      filtered = filtered.filter((asset) => asset.type === "stock");
     }
 
-    // Filter by search query
-    if (searchQuery) {
-      filtered = filtered.filter(asset =>
-        asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asset.symbol.toLowerCase().includes(searchQuery.toLowerCase())
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter(
+        (asset) => asset.name.toLowerCase().includes(query) || asset.symbol.toLowerCase().includes(query)
       );
     }
 
-    // Sort (Indian stocks first, then by selected sort)
     filtered.sort((a, b) => {
       const aIndian = a.isIndian ? 1 : 0;
       const bIndian = b.isIndian ? 1 : 0;
-      if (aIndian !== bIndian) {
-        return bIndian - aIndian;
+      if (aIndian !== bIndian) return bIndian - aIndian;
+
+      if (sortBy === "name") {
+        const cmp = a.name.localeCompare(b.name);
+        return sortOrder === "asc" ? cmp : -cmp;
       }
 
-      let aValue, bValue;
-
-      switch (sortBy) {
-        case 'name':
-          aValue = a.name.toLowerCase();
-          bValue = b.name.toLowerCase();
-          break;
-        case 'price':
-          aValue = a.current_price;
-          bValue = b.current_price;
-          break;
-        case 'change':
-          aValue = a.change_percent_24h || 0;
-          bValue = b.change_percent_24h || 0;
-          break;
-        default:
-          return 0;
+      if (sortBy === "price") {
+        const aValue = a.livePrice ?? a.current_price ?? 0;
+        const bValue = b.livePrice ?? b.current_price ?? 0;
+        return sortOrder === "asc" ? aValue - bValue : bValue - aValue;
       }
 
-      if (sortOrder === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
-      }
+      const aChange = a.changePercent1d ?? 0;
+      const bChange = b.changePercent1d ?? 0;
+      return sortOrder === "asc" ? aChange - bChange : bChange - aChange;
     });
 
-    setFilteredAssets(filtered);
-  }, [assets, searchQuery, sortBy, sortOrder, activeTab]);
+    return filtered;
+  }, [activeTab, assets, searchQuery, sortBy, sortOrder]);
 
-  const toggleWatchlist = (symbol: string) => {
-    const newWatchlist = new Set(watchlist);
-    if (newWatchlist.has(symbol)) {
-      newWatchlist.delete(symbol);
-    } else {
-      newWatchlist.add(symbol);
-    }
-    setWatchlist(newWatchlist);
-  };
-
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(price);
-  };
-
-  const formatMarketCap = (marketCap: number) => {
-    if (marketCap >= 1000000000000) {
-      return `₹${(marketCap / 1000000000000).toFixed(1)}T`;
-    } else if (marketCap >= 1000000000) {
-      return `₹${(marketCap / 1000000000).toFixed(1)}B`;
-    } else {
-      return `₹${(marketCap / 1000000).toFixed(1)}M`;
+  const toggleWatchlist = async (asset: Asset) => {
+    const symbolKey = asset.symbol.toUpperCase();
+    setPendingWatchlistSymbol(symbolKey);
+    try {
+      if (watchlistSymbols.has(symbolKey)) {
+        const response = await fetch(`${API_BASE}/api/watchlist/${asset.id}`, { method: "DELETE" });
+        if (!response.ok) throw new Error("Failed to remove from watchlist");
+        setWatchlistSymbols((prev) => {
+          const next = new Set(prev);
+          next.delete(symbolKey);
+          return next;
+        });
+        toast.success(`${asset.symbol} removed from watchlist`);
+      } else {
+        const response = await fetch(`${API_BASE}/api/watchlist`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assetId: asset.id }),
+        });
+        if (!response.ok) throw new Error("Failed to add to watchlist");
+        setWatchlistSymbols((prev) => {
+          const next = new Set(prev);
+          next.add(symbolKey);
+          return next;
+        });
+        toast.success(`${asset.symbol} added to watchlist`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Watchlist update failed");
+    } finally {
+      setPendingWatchlistSymbol(null);
     }
   };
 
@@ -200,17 +289,13 @@ const Markets = () => {
     );
   }
 
-  const stocksCount = assets.filter(a => a.type === 'stock').length;
-  const watchlistCount = watchlist.size;
-
   return (
     <DashboardLayout>
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-foreground">Markets</h1>
-            <p className="text-muted-foreground">Explore stocks</p>
+            <p className="text-muted-foreground">Live asset universe with watchlist integration</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -229,16 +314,26 @@ const Markets = () => {
           </div>
         </div>
 
+        {error && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-4 flex items-start gap-2">
+            <TriangleAlert className="w-4 h-4 text-destructive mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-destructive">Live market load failed</p>
+              <p className="text-xs text-muted-foreground mt-1">{error}</p>
+            </div>
+          </div>
+        )}
+
         {showFilters && (
-          <div className="glass-card rounded-xl p-4" data-testid="filters-panel">
+          <div className="glass-card rounded-xl p-4">
             <div className="flex items-center gap-4">
               <span className="text-sm text-muted-foreground">Quick filters:</span>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setSortBy('price');
-                  setSortOrder('desc');
+                  setSortBy("price");
+                  setSortOrder("desc");
                 }}
               >
                 Top price
@@ -247,27 +342,20 @@ const Markets = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => {
-                  setSortBy('change');
-                  setSortOrder('desc');
+                  setSortBy("change");
+                  setSortOrder("desc");
                 }}
               >
-                Biggest gainers
+                Top gainers
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setActiveTab('stocks');
-                }}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setActiveTab("stocks")}>
                 Stocks only
               </Button>
             </div>
           </div>
         )}
 
-        {/* Market Overview */}
-        <div className="grid md:grid-cols-4 gap-4">
+        <div className="grid md:grid-cols-3 gap-4">
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center gap-3">
@@ -289,8 +377,8 @@ const Markets = () => {
                   <BarChart3 className="w-5 h-5 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Stocks</p>
-                  <p className="text-2xl font-bold text-foreground">{stocksCount}</p>
+                  <p className="text-sm text-muted-foreground">Live Quotes</p>
+                  <p className="text-2xl font-bold text-foreground">{assets.filter((item) => item.changePercent1d !== null).length}</p>
                 </div>
               </div>
             </CardContent>
@@ -304,50 +392,47 @@ const Markets = () => {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Watchlist</p>
-                  <p className="text-2xl font-bold text-foreground">{watchlistCount}</p>
+                  <p className="text-2xl font-bold text-foreground">{watchlistSymbols.size}</p>
                 </div>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Asset Tabs */}
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value)}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "all" | "stocks")}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="all">All Assets ({assets.length})</TabsTrigger>
-            <TabsTrigger value="stocks">Stocks ({stocksCount})</TabsTrigger>
+            <TabsTrigger value="stocks">Stocks ({assets.length})</TabsTrigger>
           </TabsList>
 
           <TabsContent value={activeTab} className="mt-6">
-            {/* Sort Controls */}
             <div className="flex items-center gap-4 mb-4">
               <span className="text-sm text-muted-foreground">Sort by:</span>
               <div className="flex gap-2">
                 {[
-                  { key: 'name', label: 'Name' },
-                  { key: 'price', label: 'Price' },
-                  { key: 'change', label: 'Change' }
+                  { key: "name", label: "Name" },
+                  { key: "price", label: "Price" },
+                  { key: "change", label: "Change" },
                 ].map(({ key, label }) => (
                   <Button
                     key={key}
-                    variant={sortBy === key ? 'default' : 'outline'}
+                    variant={sortBy === key ? "default" : "outline"}
                     size="sm"
                     onClick={() => {
                       if (sortBy === key) {
-                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                      } else {
-                        setSortBy(key);
-                        setSortOrder('asc');
+                        setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
+                        return;
                       }
+                      setSortBy(key as "name" | "price" | "change");
+                      setSortOrder("asc");
                     }}
                   >
-                    {label} {sortBy === key && (sortOrder === 'asc' ? '↑' : '↓')}
+                    {label} {sortBy === key && (sortOrder === "asc" ? "up" : "down")}
                   </Button>
                 ))}
               </div>
             </div>
 
-            {/* Assets Table */}
             <Card>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -356,76 +441,85 @@ const Markets = () => {
                       <tr>
                         <th className="text-left p-4 font-medium text-muted-foreground">Asset</th>
                         <th className="text-right p-4 font-medium text-muted-foreground">Price</th>
-                        <th className="text-right p-4 font-medium text-muted-foreground">24h Change</th>
-                        <th className="text-right p-4 font-medium text-muted-foreground">Market Cap</th>
-                        <th className="text-right p-4 font-medium text-muted-foreground">Volume</th>
+                        <th className="text-right p-4 font-medium text-muted-foreground">1D Change</th>
+                        <th className="text-right p-4 font-medium text-muted-foreground">Feed</th>
                         <th className="text-center p-4 font-medium text-muted-foreground">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredAssets.map((asset) => (
-                        <tr
-                          key={asset.id}
-                          className="border-b border-border/50 hover:bg-secondary/20 transition-colors cursor-pointer"
-                          onClick={() => navigate(`/stock/${asset.symbol}`)}
-                        >
-                          <td className="p-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                                <span className="font-mono text-xs font-bold text-primary">
-                                  {asset.symbol.slice(0, 2)}
-                                </span>
+                      {filteredAssets.map((asset) => {
+                        const price = asset.livePrice ?? asset.current_price;
+                        const change = asset.changePercent1d;
+                        const hasLiveQuote = change !== null;
+                        const inWatchlist = watchlistSymbols.has(asset.symbol.toUpperCase());
+                        const watchBusy = pendingWatchlistSymbol === asset.symbol.toUpperCase();
+
+                        return (
+                          <tr
+                            key={asset.id}
+                            className="border-b border-border/50 hover:bg-secondary/20 transition-colors cursor-pointer"
+                            onClick={() => navigate(`/stock/${asset.symbol}`)}
+                          >
+                            <td className="p-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                                  <span className="font-mono text-xs font-bold text-primary">{asset.symbol.slice(0, 2)}</span>
+                                </div>
+                                <div>
+                                  <p className="font-medium text-foreground">{asset.name}</p>
+                                  <p className="text-sm text-muted-foreground">{asset.symbol}</p>
+                                </div>
+                                <Badge variant="outline" className="ml-2">
+                                  {asset.type}
+                                </Badge>
                               </div>
-                              <div>
-                                <p className="font-medium text-foreground">{asset.name}</p>
-                                <p className="text-sm text-muted-foreground">{asset.symbol}</p>
-                              </div>
-                              <Badge variant="outline" className="ml-2">
-                                {asset.type}
+                            </td>
+                            <td className="p-4 text-right font-mono font-medium text-foreground">{formatPrice(price)}</td>
+                            <td className="p-4 text-right">
+                              {change === null ? (
+                                <span className="text-muted-foreground text-sm">N/A</span>
+                              ) : (
+                                <div
+                                  className={`flex items-center justify-end gap-1 ${
+                                    change >= 0 ? "text-green-600" : "text-red-600"
+                                  }`}
+                                >
+                                  {change >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                                  <span className="font-medium">
+                                    {change >= 0 ? "+" : ""}
+                                    {change.toFixed(2)}%
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-4 text-right">
+                              <Badge variant="outline" className={hasLiveQuote ? "border-success/40 text-success" : ""}>
+                                {hasLiveQuote ? "Live" : "Reference"}
                               </Badge>
-                            </div>
-                          </td>
-                          <td className="p-4 text-right font-mono font-medium text-foreground">
-                            {formatPrice(asset.current_price)}
-                          </td>
-                          <td className="p-4 text-right">
-                            <div className={`flex items-center justify-end gap-1 ${(asset.change_percent_24h || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                              }`}>
-                              {(asset.change_percent_24h || 0) >= 0 ? (
-                                <TrendingUp className="w-4 h-4" />
-                              ) : (
-                                <TrendingDown className="w-4 h-4" />
-                              )}
-                              <span className="font-medium">
-                                {asset.change_percent_24h?.toFixed(2)}%
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-right font-mono text-muted-foreground">
-                            {asset.market_cap ? formatMarketCap(asset.market_cap) : 'N/A'}
-                          </td>
-                          <td className="p-4 text-right font-mono text-muted-foreground">
-                            {asset.volume_24h ? formatMarketCap(asset.volume_24h) : 'N/A'}
-                          </td>
-                          <td className="p-4 text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleWatchlist(asset.symbol);
-                              }}
-                              className="h-8 w-8 p-0"
-                            >
-                              {watchlist.has(asset.symbol) ? (
-                                <Star className="w-4 h-4 text-yellow-500 fill-current" />
-                              ) : (
-                                <StarOff className="w-4 h-4 text-muted-foreground" />
-                              )}
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="p-4 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                disabled={watchBusy}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void toggleWatchlist(asset);
+                                }}
+                              >
+                                {watchBusy ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : inWatchlist ? (
+                                  <Star className="w-4 h-4 text-yellow-500 fill-current" />
+                                ) : (
+                                  <StarOff className="w-4 h-4 text-muted-foreground" />
+                                )}
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

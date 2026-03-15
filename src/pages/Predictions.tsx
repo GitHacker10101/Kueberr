@@ -31,8 +31,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { API_BASE } from "@/lib/api";
 
 type Horizon = "daily" | "weekly" | "monthly";
+type EngineMode = "hybrid" | "quant" | "classic";
 type Strategy = "balanced" | "aggressive" | "defensive";
 type ViewMode = "list" | "grid";
 type RatingFilter = "all" | "strong-buy" | "buy" | "hold" | "sell";
@@ -81,6 +83,7 @@ interface PrecisionMode {
   achievedAccuracy: number;
   sampleSize: number;
   minConfidence: number;
+  targetMet?: boolean;
 }
 
 interface AccuracyReport {
@@ -95,7 +98,66 @@ interface AccuracyReport {
   maxDrawdown: number;
   sharpeProxy: number;
   caveat: string;
+  engine?: "quant" | "classic";
   precisionMode?: PrecisionMode;
+}
+
+interface PredictionMeta {
+  requestedEngine?: EngineMode;
+  activeEngine?: string;
+  quantStatus?: "online" | "offline" | "disabled";
+  engineVersion?: string;
+  note?: string;
+}
+
+interface QuantHealthResponse {
+  status: "online" | "offline" | "disabled";
+  checkedAt?: string;
+  message?: string;
+  health?: {
+    service?: string;
+    time?: string;
+    disclaimer?: string;
+  };
+  config?: {
+    enabled: boolean;
+    baseUrl: string;
+    timeoutMs: number;
+  };
+}
+
+interface QuantTrainingRun {
+  id: number;
+  horizon: Horizon;
+  symbols: string[];
+  sample_size: number;
+  directional_accuracy: number;
+  created_at: string;
+}
+
+interface QuantTrainingRunsResponse {
+  items: QuantTrainingRun[];
+  count: number;
+}
+
+interface QuantBacktestReport {
+  sample_size: number;
+  directional_sample_size: number;
+  directional_accuracy: number;
+  naive_accuracy: number;
+  beat_naive_baseline: boolean;
+  mae: number;
+  rmse: number;
+  mape: number;
+  trade_count: number;
+  portfolio_metrics: {
+    cagr: number;
+    sharpe: number;
+    sortino: number;
+    max_drawdown: number;
+    win_rate: number;
+    profit_factor: number;
+  };
 }
 
 interface ExplainabilityReport {
@@ -205,7 +267,6 @@ interface JournalEntry {
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
-const API_BASE = "http://localhost:3001";
 const toNumber = (value: string): number => {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -238,7 +299,9 @@ const Predictions = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [horizon, setHorizon] = useState<Horizon>("daily");
+  const [horizon, setHorizon] = useState<Horizon>("monthly");
+  const [engineMode, setEngineMode] = useState<EngineMode>("hybrid");
+  const [engineMeta, setEngineMeta] = useState<PredictionMeta | null>(null);
   const [strategy, setStrategy] = useState<Strategy>("balanced");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [ratingFilter, setRatingFilter] = useState<RatingFilter>("all");
@@ -267,26 +330,27 @@ const Predictions = () => {
   const [journalNote, setJournalNote] = useState("");
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [page, setPage] = useState(1);
+  const [quantHealth, setQuantHealth] = useState<QuantHealthResponse | null>(null);
+  const [quantRuns, setQuantRuns] = useState<QuantTrainingRun[]>([]);
+  const [quantBacktest, setQuantBacktest] = useState<QuantBacktestReport | null>(null);
+  const [quantBusy, setQuantBusy] = useState(false);
 
   const fetchAccuracy = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/predictions/accuracy?horizon=${horizon}&assets=10`);
+      const response = await fetch(`${API_BASE}/api/predictions/accuracy?horizon=${horizon}&assets=10&engine=${engineMode}`);
       if (!response.ok) throw new Error("accuracy API");
       const report = (await response.json()) as AccuracyReport;
       setAccuracy(report);
     } catch {
       setAccuracy(null);
     }
-  }, [horizon]);
+  }, [engineMode, horizon]);
 
   const fetchPredictions = useCallback(async () => {
     setLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch(`${API_BASE}/api/predictions?horizon=${horizon}&limit=40`);
-      if (!response.ok) throw new Error("pred API");
-      const data = await response.json();
+    const normalizePayload = (data: { predictions?: Partial<Prediction>[]; summary?: Summary; meta?: PredictionMeta }) => {
       const normalized = ((data.predictions ?? []) as Partial<Prediction>[]).map((item, index) => {
         const currentPrice = item.currentPrice ?? 0;
         const targetPrice = item.targetPrice ?? item.currentPrice ?? 0;
@@ -323,55 +387,140 @@ const Predictions = () => {
 
       setPredictions(normalized);
       setSummary((data.summary ?? null) as Summary | null);
+      setEngineMeta((data.meta ?? null) as PredictionMeta | null);
       if (normalized.length > 0) {
         setSelectedSymbol((previous) => previous || normalized[0]!.symbol);
       }
       setPage(1);
+    };
+
+    const fetchByMode = async (mode: EngineMode) => {
+      const response = await fetch(`${API_BASE}/api/predictions?horizon=${horizon}&limit=60&engine=${mode}`);
+      if (!response.ok) throw new Error("pred API");
+      return (await response.json()) as { predictions?: Partial<Prediction>[]; summary?: Summary; meta?: PredictionMeta };
+    };
+
+    try {
+      const data = await fetchByMode(engineMode);
+      normalizePayload(data);
     } catch {
+      if (engineMode === "quant") {
+        try {
+          const fallbackData = await fetchByMode("hybrid");
+          normalizePayload(fallbackData);
+          setError("Quant engine unavailable. Switched to hybrid predictions.");
+          setEngineMode("hybrid");
+          return;
+        } catch {
+          // continue to hard error below
+        }
+      }
       setPredictions([]);
       setSummary(null);
+      setEngineMeta(null);
       setError("Failed to load live predictions from backend.");
       setPage(1);
     } finally {
       setLoading(false);
     }
-  }, [horizon]);
+  }, [engineMode, horizon]);
 
   const fetchExplainability = useCallback(async (symbol: string) => {
     if (!symbol) return;
     try {
-      const response = await fetch(`${API_BASE}/api/predictions/explain/${symbol}?horizon=${horizon}`);
+      const response = await fetch(`${API_BASE}/api/predictions/explain/${symbol}?horizon=${horizon}&engine=${engineMode}`);
       if (!response.ok) throw new Error("explain API");
       const data = (await response.json()) as ExplainabilityReport;
       setExplainability(data);
     } catch {
       setExplainability(null);
     }
-  }, [horizon]);
+  }, [engineMode, horizon]);
 
   const fetchScenario = useCallback(async (symbol: string) => {
     if (!symbol) return;
     try {
-      const response = await fetch(`${API_BASE}/api/predictions/scenario/${symbol}?horizon=${horizon}&paths=${scenarioPaths}`);
+      const response = await fetch(`${API_BASE}/api/predictions/scenario/${symbol}?horizon=${horizon}&paths=${scenarioPaths}&engine=${engineMode}`);
       if (!response.ok) throw new Error("scenario API");
       const data = (await response.json()) as ScenarioReport;
       setScenario(data);
     } catch {
       setScenario(null);
     }
-  }, [horizon, scenarioPaths]);
+  }, [engineMode, horizon, scenarioPaths]);
 
   const fetchPlaybook = useCallback(async (symbol: string) => {
     if (!symbol) return;
     try {
-      const response = await fetch(`${API_BASE}/api/predictions/playbook/${symbol}?horizon=${horizon}`);
+      const response = await fetch(`${API_BASE}/api/predictions/playbook/${symbol}?horizon=${horizon}&engine=${engineMode}`);
       if (!response.ok) throw new Error("playbook API");
       const data = (await response.json()) as PlaybookReport;
       setPlaybook(data);
     } catch {
       setPlaybook(null);
     }
-  }, [horizon]);
+  }, [engineMode, horizon]);
+
+  const fetchQuantHealth = useCallback(async (forceRefresh: boolean = false) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/predictions/quant/health${forceRefresh ? "?refresh=1" : ""}`);
+      if (!response.ok) throw new Error("quant health API");
+      const data = (await response.json()) as QuantHealthResponse;
+      setQuantHealth(data);
+    } catch {
+      setQuantHealth({ status: "offline", message: "Quant service health check failed." });
+    }
+  }, []);
+
+  const fetchQuantRuns = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/predictions/quant/training-runs?limit=8`);
+      if (!response.ok) throw new Error("quant runs API");
+      const data = (await response.json()) as QuantTrainingRunsResponse;
+      setQuantRuns(Array.isArray(data.items) ? data.items : []);
+    } catch {
+      setQuantRuns([]);
+    }
+  }, []);
+
+  const runQuantTrain = useCallback(async () => {
+    setQuantBusy(true);
+    try {
+      const symbols = predictions.slice(0, 12).map((item) => item.symbol);
+      const response = await fetch(`${API_BASE}/api/predictions/quant/train`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ horizon, symbols }),
+      });
+      if (!response.ok) throw new Error("quant train API");
+      await Promise.all([fetchQuantHealth(true), fetchQuantRuns(), fetchAccuracy(), fetchPredictions()]);
+    } catch {
+      setError("Quant training request failed.");
+    } finally {
+      setQuantBusy(false);
+    }
+  }, [fetchAccuracy, fetchPredictions, fetchQuantHealth, fetchQuantRuns, horizon, predictions]);
+
+  const runQuantBacktest = useCallback(async () => {
+    setQuantBusy(true);
+    try {
+      const symbols = predictions.slice(0, 10).map((item) => item.symbol);
+      const response = await fetch(`${API_BASE}/api/predictions/quant/backtest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ horizon, symbols }),
+      });
+      if (!response.ok) throw new Error("quant backtest API");
+      const data = (await response.json()) as QuantBacktestReport;
+      setQuantBacktest(data);
+      await fetchAccuracy();
+    } catch {
+      setQuantBacktest(null);
+      setError("Quant backtest request failed.");
+    } finally {
+      setQuantBusy(false);
+    }
+  }, [fetchAccuracy, horizon, predictions]);
 
   const refreshAll = useCallback(() => {
     void fetchPredictions();
@@ -381,6 +530,16 @@ const Predictions = () => {
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
+
+  useEffect(() => {
+    if (engineMode === "classic") {
+      setQuantBacktest(null);
+      setQuantHealth({ status: "disabled", message: "Quant service bypassed in classic mode." });
+      return;
+    }
+    void fetchQuantHealth();
+    void fetchQuantRuns();
+  }, [engineMode, fetchQuantHealth, fetchQuantRuns]);
 
   useEffect(() => {
     setRefreshCountdown(refreshEvery);
@@ -446,7 +605,7 @@ const Predictions = () => {
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
 
-    const stream = new EventSource(`${API_BASE}/api/predictions/stream?horizon=${horizon}&limit=5&interval=12000`);
+    const stream = new EventSource(`${API_BASE}/api/predictions/stream?horizon=${horizon}&limit=5&interval=12000&engine=${engineMode}`);
     const pulseHandler = (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data) as PulseFrame;
@@ -465,7 +624,7 @@ const Predictions = () => {
       stream.removeEventListener("pulse", pulseHandler as EventListener);
       stream.close();
     };
-  }, [horizon]);
+  }, [engineMode, horizon]);
 
   const scorePrediction = useCallback(
     (prediction: Prediction): number => {
@@ -544,6 +703,8 @@ const Predictions = () => {
   const leaderboard = filtered.slice(0, 5);
   const averageConfidenceDisplay = summary?.avgActionableConfidence ?? summary?.avgConfidence ?? 0;
   const confidenceLiftValue = summary?.confidenceLift ?? 0;
+  const activeEngineLabel = engineMeta?.activeEngine ?? engineMode;
+  const quantStatusLabel = quantHealth?.status ?? engineMeta?.quantStatus ?? "unknown";
 
   const toggleCompare = (symbol: string) => {
     setCompareSymbols((previous) => {
@@ -660,6 +821,16 @@ const Predictions = () => {
               <option value={60}>60s</option>
             </select>
 
+            <select
+              className="rounded-md bg-secondary/40 border border-border/50 px-3 py-2 text-sm"
+              value={engineMode}
+              onChange={(e) => setEngineMode(e.target.value as EngineMode)}
+            >
+              <option value="hybrid">Hybrid Engine</option>
+              <option value="quant">Quant Only</option>
+              <option value="classic">Classic Only</option>
+            </select>
+
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button variant="outline" size="sm">
@@ -671,7 +842,7 @@ const Predictions = () => {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Prediction Engine</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Regime-aware ensemble blends technical, sentiment, and pattern inputs. Precision mode surfaces a confidence threshold that targets 90% hit-rate with transparent sample size.
+                    Current mode: {engineMode}. Hybrid routes to quant ensemble first and falls back to classic regime engine if needed. Precision mode surfaces a confidence threshold that targets 90% hit-rate with transparent sample size.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -689,11 +860,11 @@ const Predictions = () => {
 
         <motion.div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6" initial="initial" animate="animate" variants={{ animate: { transition: { staggerChildren: 0.04 } } }}>
           <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Strong Buy</p><p className="text-2xl font-bold text-success">{summary?.strongBuy ?? 0}</p></motion.div>
-          <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Actionable Confidence</p><p className="text-2xl font-bold">{averageConfidenceDisplay}%</p><p className="text-[11px] text-muted-foreground mt-1">{confidenceLiftValue >= 0 ? "+" : ""}{confidenceLiftValue}% vs full universe</p></motion.div>
+          <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Model Confidence</p><p className="text-2xl font-bold">{averageConfidenceDisplay}%</p><p className="text-[11px] text-muted-foreground mt-1">Not hit-rate. {confidenceLiftValue >= 0 ? "+" : ""}{confidenceLiftValue}% vs full universe</p><p className="text-[11px] text-muted-foreground">Engine: {activeEngineLabel}</p></motion.div>
           <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Win Prob</p><p className="text-2xl font-bold">{summary?.avgWinProbability ?? 0}%</p></motion.div>
           <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Agreement</p><p className="text-2xl font-bold">{summary?.avgModelAgreement ?? 0}%</p></motion.div>
           <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Risk/Reward</p><p className="text-2xl font-bold">{summary?.avgRiskReward ?? 0}</p></motion.div>
-          <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Sim. Accuracy</p><p className="text-2xl font-bold">{summary?.avgSimulatedAccuracy ?? 0}%</p></motion.div>
+          <motion.div variants={cardMotion} className="glass-card rounded-xl p-4 hover-glow"><p className="text-xs text-muted-foreground">Modeled Accuracy</p><p className="text-2xl font-bold">{summary?.avgSimulatedAccuracy ?? 0}%</p><p className="text-[11px] text-muted-foreground mt-1">Quant: {quantStatusLabel}</p></motion.div>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }} className="grid gap-4 xl:grid-cols-3">
@@ -801,11 +972,13 @@ const Predictions = () => {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid gap-4 xl:grid-cols-3">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }} className="grid gap-4 xl:grid-cols-4">
           <div className="glass-card rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="font-semibold flex items-center gap-2"><Target className="w-4 h-4 text-primary" />Accuracy Lab</h2>
-              <span className="text-xs text-muted-foreground">{accuracy ? `${accuracy.sampleSize} samples` : "No report"}</span>
+              <span className="text-xs text-muted-foreground">
+                {accuracy ? `${accuracy.sampleSize} samples | ${(accuracy.engine ?? "classic").toUpperCase()}` : "No report"}
+              </span>
             </div>
 
             {accuracy ? (
@@ -821,11 +994,67 @@ const Predictions = () => {
                   <p className="text-xs text-muted-foreground">Precision Mode (target {accuracy.precisionMode?.targetAccuracy ?? 90}%)</p>
                   <p className="font-semibold">{accuracy.precisionMode?.achievedAccuracy ?? 0}% @ {accuracy.precisionMode?.minConfidence ?? 0}+ confidence</p>
                   <p className="text-xs text-muted-foreground">Sample size: {accuracy.precisionMode?.sampleSize ?? 0}</p>
+                  <p className={`text-xs ${accuracy.precisionMode?.targetMet ? "text-success" : "text-muted-foreground"}`}>
+                    {accuracy.precisionMode?.targetMet ? "90% target achieved for this precision subset." : "90% target not met on current sample."}
+                  </p>
                 </div>
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">Accuracy API unavailable.</p>
             )}
+          </div>
+
+          <div className="glass-card rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold flex items-center gap-2"><Cpu className="w-4 h-4 text-primary" />Quant Ops</h2>
+              <span className="text-xs text-muted-foreground">{quantHealth?.status ?? "unknown"}</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-border/50 p-2">
+                <p className="text-muted-foreground">Engine Mode</p>
+                <p className="font-semibold capitalize">{engineMode}</p>
+              </div>
+              <div className="rounded-lg border border-border/50 p-2">
+                <p className="text-muted-foreground">Service</p>
+                <p className={`font-semibold ${quantHealth?.status === "online" ? "text-success" : quantHealth?.status === "disabled" ? "text-warning" : "text-destructive"}`}>
+                  {quantHealth?.status ?? "unknown"}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => void fetchQuantHealth(true)} disabled={quantBusy || engineMode === "classic"}>
+                Refresh Health
+              </Button>
+              <Button size="sm" onClick={() => void runQuantTrain()} disabled={quantBusy || engineMode === "classic"}>
+                {quantBusy ? "Running..." : "Train Quant"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void runQuantBacktest()} disabled={quantBusy || engineMode === "classic"}>
+                Backtest Quant
+              </Button>
+            </div>
+
+            {quantBacktest ? (
+              <div className="rounded-lg border border-border/50 p-2 text-xs bg-secondary/20 space-y-1">
+                <p className="text-muted-foreground">Latest Backtest</p>
+                <p>Directional accuracy: <span className="font-semibold">{quantBacktest.directional_accuracy}%</span></p>
+                <p>Sharpe: <span className="font-semibold">{quantBacktest.portfolio_metrics.sharpe.toFixed(2)}</span> | Win rate: <span className="font-semibold">{(quantBacktest.portfolio_metrics.win_rate * 100).toFixed(1)}%</span></p>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Run quant backtest to inspect walk-forward metrics.</p>
+            )}
+
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Recent Training Runs</p>
+              {quantRuns.slice(0, 3).map((run) => (
+                <div key={run.id} className="rounded border border-border/50 p-1.5 text-[11px]">
+                  <p className="font-medium">{run.horizon.toUpperCase()} | {run.directional_accuracy}%</p>
+                  <p className="text-muted-foreground">{new Date(run.created_at).toLocaleString()}</p>
+                </div>
+              ))}
+              {quantRuns.length === 0 && <p className="text-[11px] text-muted-foreground">No quant training runs yet.</p>}
+            </div>
           </div>
 
           <div className="glass-card rounded-xl p-4 space-y-3">
@@ -861,10 +1090,10 @@ const Predictions = () => {
               <div className="rounded-lg border border-border/50 p-2"><p className="text-xs text-muted-foreground">Status</p><p className="font-semibold">{autoRefresh ? "Live" : "Manual"}</p></div>
               <div className="rounded-lg border border-border/50 p-2"><p className="text-xs text-muted-foreground">Next Refresh</p><p className="font-semibold">{autoRefresh ? `${refreshCountdown}s` : "-"}</p></div>
               <div className="rounded-lg border border-border/50 p-2"><p className="text-xs text-muted-foreground">Horizon</p><p className="font-semibold uppercase">{horizon}</p></div>
-              <div className="rounded-lg border border-border/50 p-2"><p className="text-xs text-muted-foreground">Mode</p><p className="font-semibold capitalize">{strategy}</p></div>
+              <div className="rounded-lg border border-border/50 p-2"><p className="text-xs text-muted-foreground">Engine</p><p className="font-semibold capitalize">{activeEngineLabel}</p></div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Strategy sorter adapts ranking behavior: aggressive boosts upside, defensive boosts win-rate and lower risk exposure.
+              Strategy sorter adapts ranking behavior: aggressive boosts upside, defensive boosts win-rate and lower risk exposure. Current strategy mode: <span className="capitalize">{strategy}</span>.
             </p>
           </div>
         </motion.div>

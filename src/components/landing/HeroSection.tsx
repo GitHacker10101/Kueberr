@@ -5,7 +5,7 @@ import StockTicker from "./StockTicker";
 
 const highlights = [
   { value: "91.2%", label: "Average model precision" },
-  { value: "50k+", label: "Active traders" },
+  { value: "-+", label: "Active traders" },
   { value: "24/7", label: "Signal monitoring" },
 ];
 

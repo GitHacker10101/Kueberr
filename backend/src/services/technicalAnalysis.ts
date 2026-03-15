@@ -35,10 +35,49 @@ export interface NormalizedIndicators {
 }
 
 export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicators => {
+  if (data.length === 0) {
+    return {
+      rsi: 0,
+      macd: 0,
+      trend: 0,
+      volatility: 0,
+      bollingerPosition: 0,
+      stochastic: 0,
+      cci: 0,
+      adx: 0,
+      volumeMomentum: 0,
+      priceVolumeStrength: 0,
+      raw: {
+        rsi: 50,
+        atr: 0,
+        currentPrice: 0,
+        stochasticK: 50,
+        stochasticD: 50,
+        cci: 0,
+        adx: 0,
+        macdValue: 0,
+        macdSignal: 0,
+        macdHistogram: 0,
+        bollingerUpper: 0,
+        bollingerMiddle: 0,
+        bollingerLower: 0,
+        ema50: 0,
+        ema200: 0,
+        volume: 0,
+        avgVolume: 0,
+        obv: 0,
+      },
+    };
+  }
+
+  const lastOr = (values: number[], fallback: number): number =>
+    values.length > 0 ? values[values.length - 1]! : fallback;
+
   const closes = data.map(d => d.close);
   const highs = data.map(d => d.high);
   const lows = data.map(d => d.low);
-  const currentPrice = closes[closes.length - 1];
+  const currentPrice = lastOr(closes, 0);
+  const safePrice = currentPrice > 0 ? currentPrice : 1;
 
   // 1. RSI (14)
   const rsiValues = RSI.calculate({ values: closes, period: 14 });
@@ -66,18 +105,18 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
     rawMacdSignal = lastMacd.signal || 0;
     rawMacdHistogram = lastMacd.histogram || 0;
     // Normalize MACD histogram: value / (0.01 * price) to get relative strength
-    const relativeHist = rawMacdHistogram / (currentPrice * 0.005);
+    const relativeHist = rawMacdHistogram / (safePrice * 0.005);
     normMacd = Math.max(-1, Math.min(1, relativeHist));
   }
 
   // 3. Trend (EMA 50 vs EMA 200)
   const ema50 = EMA.calculate({ values: closes, period: 50 });
   const ema200 = EMA.calculate({ values: closes, period: 200 });
-  const lastEma50 = ema50[ema50.length - 1] || currentPrice;
-  const lastEma200 = ema200[ema200.length - 1] || currentPrice;
+  const lastEma50 = lastOr(ema50, currentPrice);
+  const lastEma200 = lastOr(ema200, currentPrice);
 
   let normTrend = 0;
-  if (lastEma50 && lastEma200) {
+  if (lastEma200 !== 0) {
     // Trend strength: relative distance between EMAs
     const diff = (lastEma50 - lastEma200) / lastEma200;
     // Normalize: 5% diff = full strength
@@ -86,18 +125,18 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
 
   // 4. Volatility (ATR 14)
   const atrValues = ATR.calculate({ high: highs, low: lows, close: closes, period: 14 });
-  const lastAtr = atrValues[atrValues.length - 1] || 0;
+  const lastAtr = lastOr(atrValues, 0);
   // Normalize ATR as percentage of price
-  const atrPercent = lastAtr / currentPrice;
+  const atrPercent = lastAtr / safePrice;
   const normVolatility = Math.min(1, atrPercent * 50); // 2% daily move = 1.0 volatility score
 
   // 5. Bollinger Bands (20, 2)
   const bbValues = BollingerBands.calculate({ values: closes, period: 20, stdDev: 2 });
   const lastBb = bbValues[bbValues.length - 1];
   let normBb = 0;
-  let rawBbUpper = currentPrice * 1.02;
+  let rawBbUpper = safePrice * 1.02;
   let rawBbMiddle = currentPrice;
-  let rawBbLower = currentPrice * 0.98;
+  let rawBbLower = safePrice * 0.98;
   if (lastBb) {
     rawBbUpper = lastBb.upper;
     rawBbMiddle = lastBb.middle;
@@ -134,7 +173,7 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
     close: closes,
     period: 20
   });
-  const lastCci = cciValues[cciValues.length - 1] || 0;
+  const lastCci = lastOr(cciValues, 0);
   // Normalize CCI: typically ranges -200 to +200, we'll normalize to -1 to 1
   let normCci = lastCci / 200;
   normCci = Math.max(-1, Math.min(1, normCci));
@@ -158,19 +197,23 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
 
   // 9. Volume Analysis
   const volumes = data.map(d => d.volume);
-  const currentVolume = volumes[volumes.length - 1] || 0;
+  const currentVolume = lastOr(volumes, 0);
 
   // Calculate average volume (20-day)
   const volumeSMA = SMA.calculate({ values: volumes, period: 20 });
-  const avgVolume = volumeSMA[volumeSMA.length - 1] || currentVolume;
+  const avgVolume = lastOr(volumeSMA, currentVolume);
 
   // On-Balance Volume (OBV) - Money flow indicator
   let obv = 0;
   for (let i = 1; i < closes.length; i++) {
-    if (closes[i] > closes[i - 1]) {
-      obv += volumes[i];
-    } else if (closes[i] < closes[i - 1]) {
-      obv -= volumes[i];
+    const currentClose = closes[i] ?? 0;
+    const previousClose = closes[i - 1] ?? currentClose;
+    const volumeAtIndex = volumes[i] ?? 0;
+
+    if (currentClose > previousClose) {
+      obv += volumeAtIndex;
+    } else if (currentClose < previousClose) {
+      obv -= volumeAtIndex;
     }
   }
 
@@ -182,7 +225,8 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
 
   // Price-Volume Strength: Combine price movement with volume
   // Strong up move with high volume = 1, down move with high volume = -1
-  const priceChange = closes.length > 1 ? (closes[closes.length - 1] - closes[closes.length - 2]) / closes[closes.length - 2] : 0;
+  const previousClose = closes.length > 1 ? (closes[closes.length - 2] ?? safePrice) : safePrice;
+  const priceChange = closes.length > 1 && previousClose !== 0 ? (currentPrice - previousClose) / previousClose : 0;
   const volumeStrength = volumeRatio > 1.2 ? 1 : volumeRatio < 0.8 ? -0.5 : 0;
   let normPriceVolumeStrength = priceChange * 100 * (1 + volumeStrength);
   normPriceVolumeStrength = Math.max(-1, Math.min(1, normPriceVolumeStrength));
@@ -201,7 +245,7 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
     raw: {
       rsi: lastRsi,
       atr: lastAtr,
-      currentPrice: currentPrice || 0,
+      currentPrice,
       stochasticK: rawStochK,
       stochasticD: rawStochD,
       cci: lastCci,
@@ -212,8 +256,8 @@ export const calculateIndicators = (data: HistoricalData[]): NormalizedIndicator
       bollingerUpper: rawBbUpper,
       bollingerMiddle: rawBbMiddle,
       bollingerLower: rawBbLower,
-      ema50: lastEma50 || 0,
-      ema200: lastEma200 || 0,
+      ema50: lastEma50,
+      ema200: lastEma200,
       volume: currentVolume,
       avgVolume,
       obv

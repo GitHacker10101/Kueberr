@@ -1,73 +1,111 @@
 import { Router } from 'express';
-import {
-  getUserWatchlist,
-  getAssetById,
-  getPredictionByAssetId,
-  addToWatchlist,
-  removeFromWatchlist
-} from '../dataService';
+import { addToWatchlist, getAllAssets, getUserWatchlist, removeFromWatchlist } from '../dataService';
+import { fetchMarketData, getLatestPrice } from '../services/marketDataService';
+import { getQuantPrediction, isQuantServiceEnabled } from '../services/quantBridge';
+import { setResponseMeta } from '../middleware/responseMeta';
 
 const router = Router();
+const USER_ID = 'user-1';
+
+const formatPrice = (value: number): string => `Rs ${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+const formatPct = (value: number): string => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+
+const predictionFromDirection = (direction: 'Bullish' | 'Neutral' | 'Bearish', confidence: number): string => {
+  if (direction === 'Bullish') return confidence >= 86 ? 'Strong Buy' : 'Buy';
+  if (direction === 'Bearish') return confidence >= 86 ? 'Strong Sell' : 'Sell';
+  return 'Hold';
+};
+
+const resolveLivePrediction = async (
+  symbol: string
+): Promise<{ label: string; confidence: number | null; available: boolean }> => {
+  if (!isQuantServiceEnabled()) {
+    return { label: 'Unavailable', confidence: null, available: false };
+  }
+  try {
+    const pred = await getQuantPrediction(symbol, 'monthly');
+    const confidence = Math.round(Math.max(0, Math.min(100, pred.confidence)));
+    return {
+      label: predictionFromDirection(pred.direction, confidence),
+      confidence,
+      available: true,
+    };
+  } catch {
+    return { label: 'Unavailable', confidence: null, available: false };
+  }
+};
+
+const dayChangePct = async (symbol: string, latestPrice: number): Promise<number> => {
+  try {
+    const candles = await fetchMarketData(symbol, 8, { allowSyntheticFallback: false });
+    if (candles.length < 2) return 0;
+    const prev = candles[candles.length - 2]?.close ?? latestPrice;
+    if (!prev || prev <= 0) return 0;
+    return ((latestPrice - prev) / prev) * 100;
+  } catch {
+    return 0;
+  }
+};
 
 // GET /api/watchlist - Get user's watchlist with predictions
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    // For now, using hardcoded user_id. In production, this would come from authentication
-    const userId = 'user-1';
+    setResponseMeta(res, { data_source: 'watchlist:db+market', quality_status: 'ok' });
+    const userWatchlist = getUserWatchlist(USER_ID);
+    const assets = getAllAssets();
+    let degraded = false;
 
-    const userWatchlist = getUserWatchlist(userId);
+    const items = await Promise.all(
+      userWatchlist.map(async (entry) => {
+        const asset = assets.find((item) => item.id === entry.asset_id);
+        if (!asset) return null;
 
-    const watchlist = userWatchlist.map(item => {
-      const asset = getAssetById(item.asset_id);
-      const prediction = getPredictionByAssetId(item.asset_id);
+        const latestPriceRaw = await getLatestPrice(asset.symbol, { allowHistoricalFallback: true });
+        const latestPrice = latestPriceRaw > 0 ? latestPriceRaw : Number(asset.current_price ?? 0);
+        if (!(latestPrice > 0)) return null;
 
-      if (!asset) return null;
+        const prediction = await resolveLivePrediction(asset.symbol);
+        if (!prediction.available) {
+          degraded = true;
+        }
+        const changePct = await dayChangePct(asset.symbol, latestPrice);
 
-      // Mock price changes (in production, this would come from real market data)
-      const mockChanges = {
-        'RELIANCE': { change: '+2.34%', isUp: true },
-        'TCS': { change: '+1.12%', isUp: true },
-        'INFY': { change: '-0.87%', isUp: false },
-        'HDFCBANK': { change: '+0.45%', isUp: true },
-        'ICICIBANK': { change: '-0.32%', isUp: false },
-        'BTC': { change: '+3.21%', isUp: true },
-        'ETH': { change: '-1.45%', isUp: false },
-        'SOL': { change: '+5.67%', isUp: true },
-      };
+        return {
+          id: entry.id,
+          asset_id: asset.id,
+          symbol: asset.symbol,
+          name: asset.name,
+          price: formatPrice(latestPrice),
+          change: formatPct(changePct),
+          isUp: changePct >= 0,
+          prediction: prediction.label,
+          accuracy: prediction.confidence !== null ? `${prediction.confidence.toFixed(1)}%` : 'N/A',
+          type: asset.type,
+        };
+      })
+    );
 
-      const mockChange = mockChanges[asset.symbol as keyof typeof mockChanges] || { change: '0.00%', isUp: true };
+    const watchlist = items.filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const numericAccuracy = watchlist
+      .map((item) => Number.parseFloat(item.accuracy.replace('%', '')))
+      .filter((value) => Number.isFinite(value));
+    const avgAccuracy = numericAccuracy.length > 0 ? numericAccuracy.reduce((sum, item) => sum + item, 0) / numericAccuracy.length : 0;
 
-      return {
-        id: item.id,
-        asset_id: asset.id, // Ensure asset_id is passed
-        symbol: asset.symbol,
-        name: asset.name,
-        price: `₹${asset.current_price.toLocaleString('en-IN')}`,
-        change: mockChange.change,
-        isUp: mockChange.isUp,
-        prediction: prediction?.prediction || 'Hold',
-        accuracy: `${prediction?.confidence || 85}%`,
-        type: asset.type
-      };
-    }).filter(Boolean);
-
-    // Calculate stats
-    const totalAssets = watchlist.length;
-    const stocks = watchlist.filter(item => item!.type === 'stock').length;
-    const avgAccuracy = watchlist.length > 0
-      ? watchlist.reduce((sum, item) => sum + parseFloat(item!.accuracy.replace('%', '')), 0) / watchlist.length
-      : 0;
+    if (degraded) {
+      setResponseMeta(res, { data_source: 'watchlist:db+market', quality_status: 'degraded' });
+    }
 
     res.json({
       assets: watchlist,
       stats: {
-        totalAssets,
-        stocks,
-        avgAccuracy: `${avgAccuracy.toFixed(1)}%`
-      }
+        totalAssets: watchlist.length,
+        stocks: watchlist.filter((item) => item.type === 'stock').length,
+        avgAccuracy: numericAccuracy.length > 0 ? `${avgAccuracy.toFixed(1)}%` : 'N/A',
+      },
     });
   } catch (error) {
     console.error('Error fetching watchlist:', error);
+    setResponseMeta(res, { data_source: 'watchlist:db+market', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Failed to fetch watchlist data' });
   }
 });
@@ -75,17 +113,18 @@ router.get('/', (req, res) => {
 // POST /api/watchlist - Add asset to watchlist
 router.post('/', (req, res) => {
   try {
-    const userId = 'user-1';
-    const { assetId } = req.body;
-
+    setResponseMeta(res, { data_source: 'watchlist:db', quality_status: 'ok' });
+    const assetId = String(req.body?.assetId ?? '').trim();
     if (!assetId) {
-      return res.status(400).json({ error: 'Missing assetId' });
+      res.status(400).json({ error: 'Missing assetId' });
+      return;
     }
 
-    const item = addToWatchlist(userId, assetId);
+    const item = addToWatchlist(USER_ID, assetId);
     res.status(201).json(item);
   } catch (error) {
     console.error('Error adding to watchlist:', error);
+    setResponseMeta(res, { data_source: 'watchlist:db', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -93,13 +132,12 @@ router.post('/', (req, res) => {
 // DELETE /api/watchlist/:assetId - Remove asset from watchlist
 router.delete('/:assetId', (req, res) => {
   try {
-    const userId = 'user-1';
-    const { assetId } = req.params;
-
-    removeFromWatchlist(userId, assetId);
+    setResponseMeta(res, { data_source: 'watchlist:db', quality_status: 'ok' });
+    removeFromWatchlist(USER_ID, req.params.assetId);
     res.status(200).json({ success: true });
   } catch (error) {
     console.error('Error removing from watchlist:', error);
+    setResponseMeta(res, { data_source: 'watchlist:db', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Internal server error' });
   }
 });

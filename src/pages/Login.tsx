@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Loader2
 } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -29,33 +30,42 @@ const Login = () => {
     setError("");
 
     try {
-      // Mock authentication - in real app, this would call an API
-      if (email && password) {
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Store auth token (mock)
-        localStorage.setItem('authToken', 'mock-jwt-token');
-        sessionStorage.setItem('userSession', JSON.stringify({
-          user: { email, name: 'John Doe' },
-          loginTime: new Date().toISOString()
-        }));
-
-        // Navigate to dashboard
-        navigate('/dashboard');
-      } else {
+      if (!email || !password) {
         setError("Please enter both email and password");
+        return;
       }
+
+      const response = await fetch(`${API_BASE}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload.error === "string" ? payload.error : "Login failed");
+      }
+
+      localStorage.setItem("authToken", payload.token);
+      sessionStorage.setItem(
+        "userSession",
+        JSON.stringify({
+          user: payload.user,
+          loginTime: new Date().toISOString(),
+        })
+      );
+
+      navigate("/dashboard");
     } catch (err) {
-      setError("Login failed. Please try again.");
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleDemoLogin = () => {
-    setEmail("demo@tradingapp.com");
-    setPassword("demo123");
+    setEmail("john.doe@example.com");
+    setPassword("password123");
   };
 
   return (
@@ -145,7 +155,7 @@ const Login = () => {
                 Try Demo Account
               </Button>
               <p className="text-xs text-muted-foreground text-center mt-2">
-                Use demo credentials to explore the app
+                Uses the real local backend account
               </p>
             </div>
           </CardContent>

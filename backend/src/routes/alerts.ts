@@ -1,109 +1,81 @@
 import { Router } from 'express';
+import { v4 as uuidv4 } from 'uuid';
 import db from '../database';
-import { getUserAlerts, getAssetById } from '../dataService';
+import { getAssetById } from '../dataService';
+import { setResponseMeta } from '../middleware/responseMeta';
 
 const router = Router();
+const USER_ID = 'user-1';
 
-interface Alert {
+interface AlertRow {
   id: string;
-  symbol?: string;
-  name?: string;
-  type: string;
-  threshold?: number;
+  user_id: string;
+  asset_id: string;
+  type: 'price_above' | 'price_below' | 'prediction_change';
+  threshold: number | null;
   message: string;
-  is_active?: number;
-  is_triggered?: number;
-  created_at?: string;
-  triggered_at?: string;
-  isActive?: boolean;
-  isTriggered?: boolean;
-  asset?: string;
-  time?: string;
+  is_active: number;
+  is_triggered: number;
+  created_at: string;
+  triggered_at: string | null;
 }
+
+const selectAlertsStmt = db.prepare(`
+  SELECT id, user_id, asset_id, type, threshold, message, is_active, is_triggered, created_at, triggered_at
+  FROM alerts
+  WHERE user_id = ?
+  ORDER BY created_at DESC
+`);
+
+const insertAlertStmt = db.prepare(`
+  INSERT INTO alerts (id, user_id, asset_id, type, threshold, message, is_active, is_triggered, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?)
+`);
+
+const deleteAlertStmt = db.prepare(`
+  DELETE FROM alerts
+  WHERE id = ? AND user_id = ?
+`);
 
 // GET /api/alerts - Get user's alerts
 router.get('/', (req, res) => {
   try {
-    const userId = 'user-1'; // Hardcoded for now
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'ok' });
+    const rows = selectAlertsStmt.all(USER_ID) as AlertRow[];
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
 
-    // Check if alerts table exists, if not use mock data only
-    // In a real app, migrations would handle this
-    let alerts: Alert[] = [];
-    try {
-        const alertsQuery = `
-        SELECT
-            al.id,
-            a.symbol,
-            a.name,
-            al.type,
-            al.threshold,
-            al.message,
-            al.is_active,
-            al.is_triggered,
-            al.created_at,
-            al.triggered_at
-        FROM alerts al
-        JOIN assets a ON al.asset_id = a.id
-        WHERE al.user_id = ?
-        ORDER BY al.created_at DESC
-        `;
-        alerts = db.prepare(alertsQuery).all(userId);
-    } catch (e) {
-        // Table likely doesn't exist yet, ignore
-    }
-
-    // Mock recent alerts with timestamps
-    const mockRecentAlerts = [
-      {
-        id: 'alert-1',
-        asset: 'RELIANCE',
-        symbol: 'RELIANCE',
-        message: 'Price crossed ₹2,800 resistance',
-        time: '2 min ago',
-        type: 'success',
-        isActive: true,
-        isTriggered: true,
-        triggeredAt: new Date(Date.now() - 2 * 60 * 1000).toISOString()
-      },
-      {
-        id: 'alert-2',
-        asset: 'INFY',
-        symbol: 'INFY',
-        message: 'AI prediction changed to Hold',
-        time: '15 min ago',
-        type: 'warning',
-        isActive: true,
-        isTriggered: false,
-        triggeredAt: null
-      },
-      {
-        id: 'alert-3',
-        asset: 'TCS',
-        symbol: 'TCS',
-        message: 'Approaching target price',
-        time: '1 hour ago',
-        type: 'info',
-        isActive: true,
-        isTriggered: false,
-        triggeredAt: null
-      }
-    ];
-
-    // Calculate stats
-    const totalAlerts = alerts.length > 0 ? alerts.length : mockRecentAlerts.length;
-    const activeAlerts = alerts.length > 0 ? alerts.filter(alert => alert.is_active).length : mockRecentAlerts.filter(alert => alert.isActive).length;
-    const triggeredToday = alerts.length > 0 ? alerts.filter(alert => alert.is_triggered).length : mockRecentAlerts.filter(alert => alert.isTriggered).length;
-
-    res.json({
-      alerts: alerts.length > 0 ? alerts : mockRecentAlerts,
-      stats: {
-        totalAlerts,
-        activeAlerts,
-        triggeredToday
-      }
+    const alerts = rows.map((row) => {
+      const asset = getAssetById(row.asset_id);
+      return {
+        id: row.id,
+        symbol: asset?.symbol ?? row.asset_id,
+        name: asset?.name ?? row.asset_id,
+        asset_id: row.asset_id,
+        type: row.type,
+        threshold: row.threshold,
+        message: row.message,
+        is_active: Boolean(row.is_active),
+        is_triggered: Boolean(row.is_triggered),
+        created_at: row.created_at,
+        triggered_at: row.triggered_at,
+      };
     });
+
+    const stats = {
+      totalAlerts: alerts.length,
+      activeAlerts: alerts.filter((item) => item.is_active).length,
+      triggeredToday: alerts.filter((item) => {
+        if (!item.is_triggered || !item.triggered_at) return false;
+        const dt = new Date(item.triggered_at);
+        return Number.isFinite(dt.getTime()) && dt >= todayStart;
+      }).length,
+    };
+
+    res.json({ alerts, stats });
   } catch (error) {
     console.error('Error fetching alerts:', error);
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Failed to fetch alerts data' });
   }
 });
@@ -111,23 +83,35 @@ router.get('/', (req, res) => {
 // POST /api/alerts - Create new alert
 router.post('/', (req, res) => {
   try {
-    const { assetId, type, threshold, message } = req.body;
-    const userId = 'user-1'; // Hardcoded for now
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'ok' });
+    const assetId = String(req.body?.assetId ?? '').trim();
+    const type = String(req.body?.type ?? '').trim() as AlertRow['type'];
+    const thresholdRaw = req.body?.threshold;
+    const threshold = thresholdRaw === undefined || thresholdRaw === null ? null : Number(thresholdRaw);
+    const message = String(req.body?.message ?? '').trim();
 
     if (!assetId || !type) {
-      return res.status(400).json({ error: 'Asset ID and type are required' });
+      res.status(400).json({ error: 'assetId and type are required' });
+      return;
     }
 
-    const alertId = `alert-${Date.now()}`;
+    if (!['price_above', 'price_below', 'prediction_change'].includes(type)) {
+      res.status(400).json({ error: 'Invalid alert type' });
+      return;
+    }
 
-    // In a real implementation, this would add to the alerts array in dataService
-    // For now, just return success
-    res.status(201).json({
-      id: alertId,
-      message: 'Alert created successfully'
-    });
+    if (!getAssetById(assetId)) {
+      res.status(404).json({ error: 'Asset not found' });
+      return;
+    }
+
+    const id = uuidv4();
+    insertAlertStmt.run(id, USER_ID, assetId, type, Number.isFinite(threshold as number) ? threshold : null, message, new Date().toISOString());
+
+    res.status(201).json({ id, message: 'Alert created successfully' });
   } catch (error) {
     console.error('Error creating alert:', error);
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Failed to create alert' });
   }
 });
@@ -135,13 +119,16 @@ router.post('/', (req, res) => {
 // DELETE /api/alerts/:id - Delete alert
 router.delete('/:id', (req, res) => {
   try {
-    const { id } = req.params;
-
-    // In a real implementation, this would remove from the alerts array in dataService
-    // For now, just return success
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'ok' });
+    const result = deleteAlertStmt.run(req.params.id, USER_ID);
+    if (result.changes === 0) {
+      res.status(404).json({ error: 'Alert not found' });
+      return;
+    }
     res.json({ message: 'Alert deleted successfully' });
   } catch (error) {
     console.error('Error deleting alert:', error);
+    setResponseMeta(res, { data_source: 'alerts:db', quality_status: 'unavailable' });
     res.status(500).json({ error: 'Failed to delete alert' });
   }
 });

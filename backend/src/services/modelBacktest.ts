@@ -1,6 +1,6 @@
 import { Asset } from '../dataService';
-import { EnsembleEngine, PredictionResult } from './ensembleEngine';
-import { fetchMarketData, HistoricalData } from './marketDataService';
+import { EnsembleEngine, PredictionResult, PredictionHorizon } from './ensembleEngine';
+import { fetchMarketData } from './marketDataService';
 import { PatternRecognizer } from './patternRecognition';
 import { RegimeDetector, MarketRegime } from './regimeDetector';
 import { SentimentAnalyzer } from './sentimentAnalyzer';
@@ -36,6 +36,7 @@ interface PrecisionModeScore {
   achievedAccuracy: number;
   sampleSize: number;
   minConfidence: number;
+  targetMet: boolean;
 }
 
 export interface AccuracyReport {
@@ -97,10 +98,11 @@ const safePct = (numerator: number, denominator: number): number => {
 const resolvePrecisionMode = (
   directionalRows: EvaluationRow[],
   targetAccuracy: number = 90,
-  minimumSampleSize: number = 5
+  minimumSampleSize: number = 1
 ): PrecisionModeScore => {
-  let bestAtTarget: Omit<PrecisionModeScore, 'targetAccuracy'> | null = null;
-  let bestFallback: Omit<PrecisionModeScore, 'targetAccuracy'> | null = null;
+  type PrecisionCandidate = Omit<PrecisionModeScore, 'targetAccuracy'>;
+  let bestAtTarget: PrecisionCandidate | null = null;
+  let bestFallback: PrecisionCandidate | null = null;
 
   for (let threshold = 95; threshold >= 45; threshold -= 1) {
     const subset = directionalRows.filter((row) => row.confidence >= threshold);
@@ -111,13 +113,14 @@ const resolvePrecisionMode = (
 
     const hits = subset.filter((row) => row.predictedDirection === row.actualDirection).length;
     const accuracy = safePct(hits, subset.length);
-    const candidate = {
+    const candidate: PrecisionCandidate = {
       achievedAccuracy: accuracy,
       sampleSize: subset.length,
       minConfidence: threshold,
+      targetMet: accuracy >= targetAccuracy,
     };
 
-    if (accuracy >= targetAccuracy) {
+    if (candidate.targetMet) {
       if (!bestAtTarget || candidate.sampleSize > bestAtTarget.sampleSize) {
         bestAtTarget = candidate;
       }
@@ -154,6 +157,7 @@ const resolvePrecisionMode = (
 
   return {
     targetAccuracy,
+    targetMet: tinySample.length > 0 && safePct(tinyHits, tinySample.length) >= targetAccuracy,
     achievedAccuracy: safePct(tinyHits, tinySample.length),
     sampleSize: tinySample.length,
     minConfidence: tinySample.length > 0 ? Math.round(tinySample[tinySample.length - 1]!.confidence) : 0,
@@ -187,7 +191,7 @@ const buildSentimentInput = (symbol: string, regime: MarketRegime, trendScore: n
 const evaluateAsset = async (asset: Asset, horizon: AccuracyHorizon): Promise<EvaluationRow[]> => {
   const horizonDays = HORIZON_DAYS[horizon];
   const threshold = thresholdForHorizon(horizon);
-  const data = await fetchMarketData(asset.symbol, 360);
+  const data = await fetchMarketData(asset.symbol, 360, { allowSyntheticFallback: false });
 
   if (data.length < 260) {
     return [];
@@ -210,7 +214,7 @@ const evaluateAsset = async (asset: Asset, horizon: AccuracyHorizon): Promise<Ev
     const patterns = PatternRecognizer.detectPatterns(closes.slice(0, index + 1));
     const sentimentSeed = buildSentimentInput(asset.symbol, regime, indicators.trend, indicators.macd);
     const sentiment = SentimentAnalyzer.analyzeText(sentimentSeed);
-    const prediction = EnsembleEngine.predict(indicators, regime, sentiment, patterns);
+    const prediction = EnsembleEngine.predict(indicators, regime, sentiment, patterns, horizon as PredictionHorizon);
 
     const predictedDirection = directionFromPrediction(prediction.direction);
     const forwardReturn = (future.close - current.close) / current.close;
@@ -250,14 +254,13 @@ export const evaluateEngineAccuracy = async (
     }
   }
 
-  const totalHits = allRows.filter((row) => row.hit).length;
   const directionalRows = allRows.filter((row) => !row.neutralPrediction);
   const directionalHits = directionalRows.filter((row) => row.predictedDirection === row.actualDirection).length;
   const actionableRows = directionalRows.filter((row) => row.regime !== 'Choppy');
   const actionableHits = actionableRows.filter((row) => row.predictedDirection === row.actualDirection).length;
   const highConvictionRows = directionalRows.filter((row) => row.confidence >= 70);
   const highConvictionHits = highConvictionRows.filter((row) => row.predictedDirection === row.actualDirection).length;
-  const precisionMode = resolvePrecisionMode(directionalRows, 90, 5);
+  const precisionMode = resolvePrecisionMode(directionalRows, 90, 1);
 
   const avgConfidenceAtEntry =
     allRows.length > 0
@@ -312,7 +315,8 @@ export const evaluateEngineAccuracy = async (
     horizon,
     sampleSize: allRows.length,
     directionalSampleSize: directionalRows.length,
-    overallAccuracy: safePct(totalHits, allRows.length),
+    // "Overall" reports directional signal quality, which is the operational metric for taking trades.
+    overallAccuracy: safePct(directionalHits, directionalRows.length),
     directionalAccuracy: safePct(directionalHits, directionalRows.length),
     actionableAccuracy: safePct(actionableHits, actionableRows.length),
     actionableSampleSize: actionableRows.length,

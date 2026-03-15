@@ -1,9 +1,10 @@
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from 'yahoo-finance2';
 import NodeCache from 'node-cache';
 import { getStockBySymbol } from '../data/stockList';
 
 const cache = new NodeCache({ stdTTL: 300 }); // 5 minutes
-const REQUEST_DELAY = 700; // Avoid aggressive burst requests to upstream.
+const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical'] });
+const REQUEST_DELAY = 120; // Keep upstream polite without making prediction pages stall.
 let lastRequestTime = 0;
 
 export interface HistoricalData {
@@ -13,6 +14,33 @@ export interface HistoricalData {
   low: number;
   close: number;
   volume: number;
+}
+
+interface FetchMarketDataOptions {
+  allowSyntheticFallback?: boolean;
+}
+
+interface LatestPriceOptions {
+  allowHistoricalFallback?: boolean;
+}
+
+export interface QuoteSnapshot {
+  symbol: string;
+  price: number;
+  previousClose: number | null;
+  changePercent1d: number | null;
+  volume: number | null;
+  asOf: string;
+}
+
+export interface MarketNewsItem {
+  id: string;
+  symbol: string;
+  title: string;
+  summary: string;
+  source: string;
+  publishedAt: string;
+  url: string;
 }
 
 interface YahooHistoricalQuote {
@@ -26,6 +54,17 @@ interface YahooHistoricalQuote {
 
 interface YahooQuoteSummary {
   regularMarketPrice?: number | null;
+  regularMarketPreviousClose?: number | null;
+  regularMarketVolume?: number | null;
+}
+
+interface YahooSearchNewsItem {
+  uuid?: string;
+  title?: string;
+  publisher?: string;
+  providerPublishTime?: number;
+  link?: string;
+  summary?: string;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,7 +128,12 @@ const generateSyntheticHistory = (symbol: string, days: number): HistoricalData[
   return result;
 };
 
-export const fetchMarketData = async (symbol: string, days: number = 240): Promise<HistoricalData[]> => {
+export const fetchMarketData = async (
+  symbol: string,
+  days: number = 240,
+  options: FetchMarketDataOptions = {}
+): Promise<HistoricalData[]> => {
+  const allowSyntheticFallback = options.allowSyntheticFallback ?? false;
   const normalizedSymbol = symbol.trim().toUpperCase();
   const yahooSymbol = toYahooSymbol(normalizedSymbol);
   const cacheKey = `market_data_${yahooSymbol}_${days}`;
@@ -109,7 +153,8 @@ export const fetchMarketData = async (symbol: string, days: number = 240): Promi
     period1.setDate(period1.getDate() - Math.ceil(days * 1.6));
 
     const queryOptions = {
-      period1: period1.toISOString().split('T')[0],
+      period1,
+      period2: new Date(),
       interval: '1d' as const,
     };
 
@@ -144,6 +189,9 @@ export const fetchMarketData = async (symbol: string, days: number = 240): Promi
     cache.set(cacheKey, formatted);
     return formatted;
   } catch (error) {
+    if (!allowSyntheticFallback) {
+      throw error;
+    }
     console.warn(`Market data fallback for ${normalizedSymbol} (${yahooSymbol}):`, error);
     const synthetic = generateSyntheticHistory(normalizedSymbol, Math.max(days, 220));
     cache.set(cacheKey, synthetic);
@@ -151,14 +199,124 @@ export const fetchMarketData = async (symbol: string, days: number = 240): Promi
   }
 };
 
-export const getLatestPrice = async (symbol: string): Promise<number> => {
+export const getLatestPrice = async (symbol: string, options: LatestPriceOptions = {}): Promise<number> => {
+  const allowHistoricalFallback = options.allowHistoricalFallback ?? true;
   try {
     const yahooSymbol = toYahooSymbol(symbol);
     const quote = (await yahooFinance.quote(yahooSymbol)) as unknown as YahooQuoteSummary;
-    return quote.regularMarketPrice ?? 0;
+    if (quote.regularMarketPrice && quote.regularMarketPrice > 0) {
+      return quote.regularMarketPrice;
+    }
+    if (!allowHistoricalFallback) {
+      throw new Error(`Quote missing latest price for ${symbol}`);
+    }
+    const candles = await fetchMarketData(symbol, 8, { allowSyntheticFallback: false });
+    return candles[candles.length - 1]?.close ?? 0;
   } catch (error) {
-    console.warn(`Latest price fallback for ${symbol}:`, error);
-    const synthetic = generateSyntheticHistory(symbol, 3);
-    return synthetic[synthetic.length - 1]?.close ?? 0;
+    if (!allowHistoricalFallback) {
+      throw error;
+    }
+    console.warn(`Latest price historical fallback for ${symbol}:`, error);
+    const candles = await fetchMarketData(symbol, 12, { allowSyntheticFallback: false });
+    return candles[candles.length - 1]?.close ?? 0;
   }
+};
+
+export const getQuoteSnapshot = async (symbol: string): Promise<QuoteSnapshot> => {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const yahooSymbol = toYahooSymbol(normalizedSymbol);
+
+  let quote: YahooQuoteSummary | null = null;
+  let price = 0;
+  let previousClose: number | null = null;
+
+  try {
+    quote = (await yahooFinance.quote(yahooSymbol)) as unknown as YahooQuoteSummary;
+    price = quote.regularMarketPrice && quote.regularMarketPrice > 0 ? quote.regularMarketPrice : 0;
+    previousClose =
+      quote.regularMarketPreviousClose && quote.regularMarketPreviousClose > 0
+        ? quote.regularMarketPreviousClose
+        : null;
+  } catch {
+    quote = null;
+  }
+
+  if (!(price > 0)) {
+    const candles = await fetchMarketData(symbol, 12, { allowSyntheticFallback: false });
+    const latest = candles[candles.length - 1]?.close ?? 0;
+    const prev = candles[candles.length - 2]?.close ?? null;
+    price = latest > 0 ? latest : 0;
+    previousClose = prev && prev > 0 ? prev : previousClose;
+  }
+
+  if (!(price > 0)) {
+    throw new Error(`Quote unavailable for ${normalizedSymbol}`);
+  }
+
+  const changePercent1d =
+    previousClose && previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null;
+
+  return {
+    symbol: normalizedSymbol,
+    price,
+    previousClose,
+    changePercent1d,
+    volume: quote?.regularMarketVolume && quote.regularMarketVolume > 0 ? quote.regularMarketVolume : null,
+    asOf: new Date().toISOString(),
+  };
+};
+
+export const fetchMarketNews = async (symbols: string[], limit: number = 40): Promise<MarketNewsItem[]> => {
+  const uniqueSymbols = Array.from(
+    new Set(
+      symbols
+        .map((item) => item.trim().toUpperCase())
+        .filter((item) => item.length > 0)
+    )
+  ).slice(0, 12);
+
+  const rows = await Promise.all(
+    uniqueSymbols.map(async (symbol) => {
+      try {
+        const result = (await yahooFinance.search(symbol, {
+          quotesCount: 0,
+          newsCount: 8,
+        } as unknown as Record<string, unknown>)) as unknown as { news?: YahooSearchNewsItem[] };
+
+        const newsList = Array.isArray(result.news) ? result.news : [];
+        return newsList.map((item) => {
+          const publishedAt = item.providerPublishTime
+            ? new Date(item.providerPublishTime * 1000).toISOString()
+            : new Date().toISOString();
+          return {
+            id: item.uuid ?? `${symbol}-${item.link ?? item.title ?? publishedAt}`,
+            symbol,
+            title: item.title ?? `${symbol} market update`,
+            summary: item.summary ?? "Latest market development.",
+            source: item.publisher ?? "Yahoo Finance",
+            publishedAt,
+            url: item.link ?? "#",
+          } as MarketNewsItem;
+        });
+      } catch {
+        return [] as MarketNewsItem[];
+      }
+    })
+  );
+
+  const merged = rows.flat();
+  if (merged.length === 0) {
+    throw new Error('No live news available');
+  }
+
+  const dedup = new Map<string, MarketNewsItem>();
+  merged.forEach((item) => {
+    if (!dedup.has(item.id)) {
+      dedup.set(item.id, item);
+    }
+  });
+
+  return Array.from(dedup.values())
+    .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+    .slice(0, Math.max(1, Math.min(100, limit)));
 };

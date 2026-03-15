@@ -49,6 +49,14 @@ export interface Alert {
   is_triggered: boolean;
 }
 
+const normalizeAssetId = (symbol: string): string =>
+  symbol
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || uuidv4();
+
 // --- Database Accessors ---
 
 export const getAllAssets = (): Asset[] => {
@@ -59,6 +67,34 @@ export const getAllAssets = (): Asset[] => {
 export const getAssetById = (assetId: string): Asset | undefined => {
   const stmt = db.prepare('SELECT * FROM assets WHERE id = ?');
   return stmt.get(assetId) as Asset | undefined;
+};
+
+export const getAssetBySymbol = (symbol: string): Asset | undefined => {
+  const stmt = db.prepare('SELECT * FROM assets WHERE UPPER(symbol) = ?');
+  return stmt.get(symbol.trim().toUpperCase()) as Asset | undefined;
+};
+
+export const upsertAssetBySymbol = (symbol: string, name?: string): Asset => {
+  const cleanedSymbol = symbol.trim().toUpperCase();
+  const existing = getAssetBySymbol(cleanedSymbol);
+  if (existing) {
+    return existing;
+  }
+
+  const id = normalizeAssetId(cleanedSymbol);
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO assets (id, symbol, name, type, current_price, last_updated)
+    VALUES (?, ?, ?, 'stock', ?, ?)
+  `);
+
+  insert.run(id, cleanedSymbol, name?.trim() || cleanedSymbol, null, new Date().toISOString());
+  return (getAssetBySymbol(cleanedSymbol) as Asset) ?? {
+    id,
+    symbol: cleanedSymbol,
+    name: name?.trim() || cleanedSymbol,
+    type: 'stock',
+    current_price: 0,
+  };
 };
 
 export const getAllPredictions = (): Prediction[] => {

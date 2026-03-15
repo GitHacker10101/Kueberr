@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { TrendingUp, Mail, Lock, User, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { API_BASE } from "@/lib/api";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -34,41 +35,23 @@ const Auth = () => {
     }
 
     try {
-      // Try to connect to backend, but fallback to simulation if it fails
-      try {
-        const url = isLogin ? "http://localhost:3001/api/auth/login" : "http://localhost:3001/api/auth/signup";
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: formData.email, password: formData.password, name: formData.name }),
-        });
-        
-        if (res.ok) {
-          const data = await res.json();
-          localStorage.setItem("authToken", data.token);
-          sessionStorage.setItem("userSession", JSON.stringify({ user: data.user, loginTime: new Date().toISOString() }));
-          toast({ title: isLogin ? "Welcome back!" : "Account created!", description: "Redirecting to dashboard..." });
-          navigate("/dashboard");
-          return;
-        }
-      } catch (networkErr) {
-        console.log("Backend not available, using simulation mode");
+      const url = isLogin ? `${API_BASE}/api/auth/login` : `${API_BASE}/api/auth/signup`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formData.email, password: formData.password, name: formData.name }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(typeof payload.error === "string" ? payload.error : "Authentication failed");
       }
 
-      // Simulation fallback
-      await new Promise(resolve => setTimeout(resolve, 800)); // Simulate delay
-      const mockToken = "mock-jwt-token-" + Math.random().toString(36).substring(2);
-      const mockUser = {
-        id: "user-1",
-        name: formData.name || "John Doe",
-        email: formData.email
-      };
-      
-      localStorage.setItem("authToken", mockToken);
-      sessionStorage.setItem("userSession", JSON.stringify({ user: mockUser, loginTime: new Date().toISOString() }));
+      const data = await res.json();
+      localStorage.setItem("authToken", data.token);
+      sessionStorage.setItem("userSession", JSON.stringify({ user: data.user, loginTime: new Date().toISOString() }));
       toast({ title: isLogin ? "Welcome back!" : "Account created!", description: "Redirecting to dashboard..." });
       navigate("/dashboard");
-      
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Authentication failed. Please try again.");
     } finally {
@@ -214,7 +197,7 @@ const Auth = () => {
                     className="text-sm text-primary hover:text-primary/80"
                     onClick={async () => {
                       try {
-                        await fetch("http://localhost:3001/api/auth/reset", {
+                        await fetch(`${API_BASE}/api/auth/reset`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ email: formData.email }),

@@ -1,9 +1,19 @@
 import DashboardLayout from "@/components/dashboard/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TrendingUp, TrendingDown, Search, Plus, Star, Trash2, Loader2 } from "lucide-react";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { ArrowUpDown, Search, Plus, Star, Trash2, Loader2, SlidersHorizontal } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { API_BASE } from "@/lib/api";
 
 interface WatchlistItem {
   id: string;
@@ -26,6 +36,13 @@ interface WatchlistStats {
   avgAccuracy: string;
 }
 
+interface MarketStockSearchItem {
+  id: string;
+  symbol: string;
+  name: string;
+  type: string;
+}
+
 const Watchlist = () => {
   const navigate = useNavigate();
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
@@ -36,13 +53,13 @@ const Watchlist = () => {
   // Add Stock State
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [addSearchQuery, setAddSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<MarketStockSearchItem[]>([]);
   const [addingId, setAddingId] = useState<string | null>(null);
 
   const fetchWatchlist = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:3001/api/watchlist');
+      const response = await fetch(`${API_BASE}/api/watchlist`);
       if (!response.ok) throw new Error('Failed to fetch watchlist');
       const data = await response.json();
 
@@ -76,10 +93,11 @@ const Watchlist = () => {
       }
 
       try {
-        const response = await fetch(`http://localhost:3001/api/market/stocks`);
+        const response = await fetch(`${API_BASE}/api/market/stocks?limit=400`);
         if (response.ok) {
-          const allStocks = await response.json();
-          const filtered = allStocks.filter((s: any) =>
+          const payload = (await response.json()) as { items?: MarketStockSearchItem[] } | MarketStockSearchItem[];
+          const allStocks = Array.isArray(payload) ? payload : Array.isArray(payload.items) ? payload.items : [];
+          const filtered = allStocks.filter((s) =>
             s.symbol.toLowerCase().includes(addSearchQuery.toLowerCase()) ||
             s.name.toLowerCase().includes(addSearchQuery.toLowerCase())
           ).slice(0, 5);
@@ -97,7 +115,7 @@ const Watchlist = () => {
   const handleAddToWatchlist = async (stock: any) => {
     setAddingId(stock.id);
     try {
-      const response = await fetch('http://localhost:3001/api/watchlist', {
+      const response = await fetch(`${API_BASE}/api/watchlist`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId: stock.id }),
@@ -122,7 +140,7 @@ const Watchlist = () => {
     if (!confirm("Remove from watchlist?")) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/watchlist/${assetId}`, {
+      const response = await fetch(`${API_BASE}/api/watchlist/${assetId}`, {
         method: 'DELETE',
       });
 
